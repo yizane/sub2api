@@ -79,6 +79,14 @@ func (c StubConcurrencyCache) CleanupExpiredAccountSlots(_ context.Context, _ in
 func (c StubConcurrencyCache) CleanupStaleProcessSlots(_ context.Context, _ string) error {
 	return nil
 }
+func (c StubConcurrencyCache) CleanupAllExpiredSlots(_ context.Context) error              { return nil }
+func (c StubConcurrencyCache) RegisterInstance(_ context.Context, _ string) error           { return nil }
+func (c StubConcurrencyCache) UnregisterInstance(_ context.Context, _ string) error         { return nil }
+func (c StubConcurrencyCache) FindDeadInstancePrefixes(_ context.Context, _ int64) ([]string, error) {
+	return nil, nil
+}
+func (c StubConcurrencyCache) RemoveDeadInstances(_ context.Context, _ []string) error  { return nil }
+func (c StubConcurrencyCache) CleanupSlotsForPrefixes(_ context.Context, _ []string) error { return nil }
 
 // ============================================================
 // StubGatewayCache — service.GatewayCache 的空实现

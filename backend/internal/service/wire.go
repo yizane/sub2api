@@ -172,10 +172,12 @@ func ProvideTimingWheelService() (*TimingWheelService, error) {
 	return svc, nil
 }
 
-// ProvideDeferredService creates and starts DeferredService
+// ProvideDeferredService creates and starts DeferredService.
+// DeferredService flushes last_used_at updates queued by web request handlers,
+// so it must start on web-enabled instances (web / all).
 func ProvideDeferredService(accountRepo AccountRepository, timingWheel *TimingWheelService) *DeferredService {
 	svc := NewDeferredService(accountRepo, timingWheel, 10*time.Second)
-	if app.IsWorkerEnabled() {
+	if app.IsWebEnabled() {
 		svc.Start()
 	}
 	return svc
@@ -184,13 +186,20 @@ func ProvideDeferredService(accountRepo AccountRepository, timingWheel *TimingWh
 // ProvideConcurrencyService creates ConcurrencyService and starts slot cleanup worker.
 func ProvideConcurrencyService(cache ConcurrencyCache, accountRepo AccountRepository, cfg *config.Config) *ConcurrencyService {
 	svc := NewConcurrencyService(cache)
-	if app.IsWorkerEnabled() {
+	// 启动时清理残留槽位：
+	// - all 模式（单实例）：保持原有行为，按 prefix 清理非本进程的槽位
+	// - web/worker 模式（多实例）：使用实例心跳注册表，只清理已死实例的槽位，
+	//   不会误删其他活跃 pod 的槽位，也能立即清理本 pod 上一世的残留
+	if app.CurrentRole() == app.RoleAll {
 		if err := svc.CleanupStaleProcessSlots(context.Background()); err != nil {
 			logger.LegacyPrintf("service.concurrency", "Warning: startup cleanup stale process slots failed: %v", err)
 		}
-		if cfg != nil {
-			svc.StartSlotCleanupWorker(accountRepo, cfg.Gateway.Scheduling.SlotCleanupInterval)
-		}
+	} else if app.IsWebEnabled() {
+		svc.StartInstanceHeartbeat(context.Background())
+	}
+	// SlotCleanupWorker 定期清理过期槽位（按 TTL），属于后台维护任务。
+	if app.IsWorkerEnabled() && cfg != nil {
+		svc.StartSlotCleanupWorker(accountRepo, cfg.Gateway.Scheduling.SlotCleanupInterval)
 	}
 	return svc
 }

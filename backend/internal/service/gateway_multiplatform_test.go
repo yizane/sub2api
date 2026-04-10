@@ -1989,6 +1989,14 @@ func (m *mockConcurrencyCache) CleanupExpiredAccountSlots(ctx context.Context, a
 func (m *mockConcurrencyCache) CleanupStaleProcessSlots(ctx context.Context, activeRequestPrefix string) error {
 	return nil
 }
+func (m *mockConcurrencyCache) CleanupAllExpiredSlots(context.Context) error              { return nil }
+func (m *mockConcurrencyCache) RegisterInstance(context.Context, string) error             { return nil }
+func (m *mockConcurrencyCache) UnregisterInstance(context.Context, string) error           { return nil }
+func (m *mockConcurrencyCache) FindDeadInstancePrefixes(context.Context, int64) ([]string, error) {
+	return nil, nil
+}
+func (m *mockConcurrencyCache) RemoveDeadInstances(context.Context, []string) error  { return nil }
+func (m *mockConcurrencyCache) CleanupSlotsForPrefixes(context.Context, []string) error { return nil }
 
 func (m *mockConcurrencyCache) GetUsersLoadBatch(ctx context.Context, users []UserWithConcurrency) (map[int64]*UserLoadInfo, error) {
 	result := make(map[int64]*UserLoadInfo, len(users))
