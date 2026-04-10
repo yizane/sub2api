@@ -16,6 +16,7 @@ import (
 	"time"
 
 	_ "github.com/Wei-Shaw/sub2api/ent/runtime"
+	"github.com/Wei-Shaw/sub2api/internal/app"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -58,6 +59,11 @@ func main() {
 	logger.InitBootstrap()
 	defer logger.Sync()
 
+	// Determine deployment role before anything else.
+	// This must happen before Wire providers run because they check
+	// app.IsWorkerEnabled() to decide whether to Start() background tasks.
+	role := app.ParseRoleFromEnv()
+
 	// Parse command line flags
 	setupMode := flag.Bool("setup", false, "Run setup wizard in CLI mode")
 	showVersion := flag.Bool("version", false, "Show version information")
@@ -76,8 +82,9 @@ func main() {
 		return
 	}
 
-	// Check if setup is needed
-	if setup.NeedsSetup() {
+	// Setup wizard — only relevant when HTTP is served (web / all).
+	// Worker-only mode skips setup entirely.
+	if app.IsWebEnabled() && setup.NeedsSetup() {
 		// Check if auto-setup is enabled (for Docker deployment)
 		if setup.AutoSetupEnabled() {
 			log.Println("Auto setup mode enabled...")
@@ -92,8 +99,15 @@ func main() {
 		}
 	}
 
-	// Normal server mode
-	runMainServer()
+	// Branch by role
+	switch role {
+	case app.RoleWeb:
+		runMainServer()
+	case app.RoleWorker:
+		runWorker()
+	default: // app.RoleAll — preserves original behaviour
+		runMainServer()
+	}
 }
 
 func runSetupServer() {
@@ -126,6 +140,40 @@ func runSetupServer() {
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("Failed to start setup server: %v", err)
 	}
+}
+
+// runWorker starts only background workers (no HTTP server).
+// It reuses the same Wire dependency graph — providers already skip Start()
+// for worker tasks when role != worker/all, and we simply never call
+// ListenAndServe here.
+func runWorker() {
+	cfg, err := config.LoadForBootstrap()
+	if err != nil {
+		log.Fatalf("Failed to load config: %v", err)
+	}
+	if err := logger.Init(logger.OptionsFromConfig(cfg.Log)); err != nil {
+		log.Fatalf("Failed to initialize logger: %v", err)
+	}
+
+	buildInfo := handler.BuildInfo{
+		Version:   Version,
+		BuildType: BuildType,
+	}
+
+	application, err := initializeApplication(buildInfo)
+	if err != nil {
+		log.Fatalf("Failed to initialize application: %v", err)
+	}
+	defer application.Cleanup()
+
+	log.Println("Worker started (no HTTP server)")
+
+	// Block until termination signal
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	log.Println("Worker shutting down...")
 }
 
 func runMainServer() {
