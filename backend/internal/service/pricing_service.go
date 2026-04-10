@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/app"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
@@ -138,8 +139,10 @@ func (s *PricingService) Initialize() error {
 		}
 	}
 
-	// 启动定时更新
-	s.startUpdateScheduler()
+	// 定时更新只在 worker 角色启动（web 使用启动时加载的数据）
+	if app.IsWorkerEnabled() {
+		s.startUpdateScheduler()
+	}
 
 	logger.LegacyPrintf("service.pricing", "[Pricing] Service initialized with %d models", len(s.pricingData))
 	return nil
