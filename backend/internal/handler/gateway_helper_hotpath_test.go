@@ -123,6 +123,14 @@ func (s *helperConcurrencyCacheStub) CleanupExpiredAccountSlots(ctx context.Cont
 func (s *helperConcurrencyCacheStub) CleanupStaleProcessSlots(ctx context.Context, activeRequestPrefix string) error {
 	return nil
 }
+func (s *helperConcurrencyCacheStub) CleanupAllExpiredSlots(context.Context) error              { return nil }
+func (s *helperConcurrencyCacheStub) RegisterInstance(context.Context, string) error             { return nil }
+func (s *helperConcurrencyCacheStub) UnregisterInstance(context.Context, string) error           { return nil }
+func (s *helperConcurrencyCacheStub) FindDeadInstancePrefixes(context.Context, int64) ([]string, error) {
+	return nil, nil
+}
+func (s *helperConcurrencyCacheStub) RemoveDeadInstances(context.Context, []string) error  { return nil }
+func (s *helperConcurrencyCacheStub) CleanupSlotsForPrefixes(context.Context, []string) error { return nil }
 
 func newHelperTestContext(method, path string) (*gin.Context, *httptest.ResponseRecorder) {
 	gin.SetMode(gin.TestMode)

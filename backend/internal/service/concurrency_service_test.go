@@ -94,6 +94,20 @@ func (c *stubConcurrencyCacheForTest) CleanupExpiredAccountSlots(_ context.Conte
 func (c *stubConcurrencyCacheForTest) CleanupStaleProcessSlots(_ context.Context, _ string) error {
 	return c.cleanupErr
 }
+func (c *stubConcurrencyCacheForTest) CleanupAllExpiredSlots(_ context.Context) error { return nil }
+func (c *stubConcurrencyCacheForTest) RegisterInstance(_ context.Context, _ string) error { return nil }
+func (c *stubConcurrencyCacheForTest) UnregisterInstance(_ context.Context, _ string) error {
+	return nil
+}
+func (c *stubConcurrencyCacheForTest) FindDeadInstancePrefixes(_ context.Context, _ int64) ([]string, error) {
+	return nil, nil
+}
+func (c *stubConcurrencyCacheForTest) RemoveDeadInstances(_ context.Context, _ []string) error {
+	return nil
+}
+func (c *stubConcurrencyCacheForTest) CleanupSlotsForPrefixes(_ context.Context, _ []string) error {
+	return nil
+}
 
 type trackingConcurrencyCache struct {
 	stubConcurrencyCacheForTest

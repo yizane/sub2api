@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/redis/go-redis/v9"
@@ -531,6 +532,172 @@ func (c *concurrencyCache) cleanupSlotsByPattern(ctx context.Context, pattern, a
 			_, err := startupCleanupScript.Run(ctx, c.rdb, keys, activePrefix, c.slotTTLSeconds).Result()
 			if err != nil {
 				return fmt.Errorf("cleanup slots %s: %w", pattern, err)
+			}
+		}
+		cursor = nextCursor
+		if cursor == 0 {
+			break
+		}
+	}
+	return nil
+}
+
+// cleanupExpiredSlotsByPattern scans all sorted-set keys matching pattern and
+// removes members whose score (timestamp) is older than slotTTL. This is the
+// multi-instance-safe alternative to CleanupStaleProcessSlots: it does not
+// compare request-ID prefixes, so it never removes another pod's active slots.
+func (c *concurrencyCache) cleanupExpiredSlotsByPattern(ctx context.Context, pattern string) error {
+	const scanCount = 200
+	var cursor uint64
+	for {
+		keys, nextCursor, err := c.rdb.Scan(ctx, cursor, pattern, scanCount).Result()
+		if err != nil {
+			return fmt.Errorf("scan %s: %w", pattern, err)
+		}
+		for _, key := range keys {
+			if _, err := cleanupExpiredSlotsScript.Run(ctx, c.rdb, []string{key}, c.slotTTLSeconds).Result(); err != nil {
+				return fmt.Errorf("cleanup expired slots %s: %w", key, err)
+			}
+		}
+		cursor = nextCursor
+		if cursor == 0 {
+			break
+		}
+	}
+	return nil
+}
+
+// CleanupAllExpiredSlots removes expired members from all account/user slot
+// sorted sets and deletes stale wait-counter keys. Safe for multi-instance use.
+func (c *concurrencyCache) CleanupAllExpiredSlots(ctx context.Context) error {
+	// 1. 清理 account 和 user 槽位有序集合中过期成员（按 TTL）
+	for _, pattern := range []string{accountSlotKeyPrefix + "*", userSlotKeyPrefix + "*"} {
+		if err := c.cleanupExpiredSlotsByPattern(ctx, pattern); err != nil {
+			return err
+		}
+	}
+	// 2. 等待计数器是普通 key，本身设有 TTL，Redis 自动过期，无需额外清理
+	return nil
+}
+
+// ---- 实例心跳注册表 ----
+// Key: concurrency:instances (sorted set, member=prefix, score=timestamp)
+const instanceRegistryKey = "concurrency:instances"
+
+// redisUnixNow fetches the current Unix timestamp from the Redis server.
+// Using server time avoids clock-skew issues across pods.
+func (c *concurrencyCache) redisUnixNow(ctx context.Context) (int64, error) {
+	t, err := c.rdb.Time(ctx).Result()
+	if err != nil {
+		return 0, fmt.Errorf("redis TIME: %w", err)
+	}
+	return t.Unix(), nil
+}
+
+func (c *concurrencyCache) RegisterInstance(ctx context.Context, prefix string) error {
+	now, err := c.redisUnixNow(ctx)
+	if err != nil {
+		return err
+	}
+	return c.rdb.ZAdd(ctx, instanceRegistryKey, redis.Z{
+		Score:  float64(now),
+		Member: prefix,
+	}).Err()
+}
+
+func (c *concurrencyCache) UnregisterInstance(ctx context.Context, prefix string) error {
+	return c.rdb.ZRem(ctx, instanceRegistryKey, prefix).Err()
+}
+
+func (c *concurrencyCache) FindDeadInstancePrefixes(ctx context.Context, heartbeatTimeout int64) ([]string, error) {
+	now, err := c.redisUnixNow(ctx)
+	if err != nil {
+		return nil, err
+	}
+	deadline := fmt.Sprintf("%d", now-heartbeatTimeout)
+	return c.rdb.ZRangeByScore(ctx, instanceRegistryKey, &redis.ZRangeBy{
+		Min: "-inf",
+		Max: deadline,
+	}).Result()
+}
+
+func (c *concurrencyCache) RemoveDeadInstances(ctx context.Context, prefixes []string) error {
+	if len(prefixes) == 0 {
+		return nil
+	}
+	members := make([]interface{}, len(prefixes))
+	for i, p := range prefixes {
+		members[i] = p
+	}
+	return c.rdb.ZRem(ctx, instanceRegistryKey, members...).Err()
+}
+
+// CleanupSlotsForPrefixes removes slot members and wait-counter keys belonging
+// to the specified dead prefixes. Uses the existing startupCleanupScript (which
+// removes members whose prefix does NOT match a given "active" prefix) in
+// reverse: for each dead prefix, we scan and remove matching members.
+func (c *concurrencyCache) CleanupSlotsForPrefixes(ctx context.Context, deadPrefixes []string) error {
+	if len(deadPrefixes) == 0 {
+		return nil
+	}
+
+	// For slot sorted sets: scan all keys, remove members matching dead prefixes
+	for _, pattern := range []string{accountSlotKeyPrefix + "*", userSlotKeyPrefix + "*"} {
+		if err := c.cleanupSlotsByDeadPrefixes(ctx, pattern, deadPrefixes); err != nil {
+			return err
+		}
+	}
+
+	// Wait counters are plain INCR keys — they don't contain prefix info, so we
+	// can't selectively attribute counts to a specific instance. After removing dead
+	// instance slots, the counters may be inflated by dead waiters. Delete them all
+	// so live instances re-increment naturally; the brief reset to 0 is preferable
+	// to leaving stale elevated counters that reject valid requests for up to 15 min.
+	for _, pattern := range []string{accountWaitKeyPrefix + "*", waitQueueKeyPrefix + "*"} {
+		if err := c.deleteKeysByPattern(ctx, pattern); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// cleanupSlotsByDeadPrefixes scans sorted-set keys matching pattern and removes
+// members whose prefix matches any of the dead prefixes.
+// Request IDs are formatted as "{prefix}-{seq}" (see generateRequestID), so the
+// match must include the "-" delimiter to avoid false positives like dead prefix
+// "r1" matching a live request ID "r10-42".
+func (c *concurrencyCache) cleanupSlotsByDeadPrefixes(ctx context.Context, pattern string, deadPrefixes []string) error {
+	// Pre-build "prefix-" strings so the inner loop only does HasPrefix checks.
+	prefixesWithDelim := make([]string, len(deadPrefixes))
+	for i, dp := range deadPrefixes {
+		prefixesWithDelim[i] = dp + "-"
+	}
+
+	const scanCount = 200
+	var cursor uint64
+	for {
+		keys, nextCursor, err := c.rdb.Scan(ctx, cursor, pattern, scanCount).Result()
+		if err != nil {
+			return fmt.Errorf("scan %s: %w", pattern, err)
+		}
+		for _, key := range keys {
+			members, err := c.rdb.ZRange(ctx, key, 0, -1).Result()
+			if err != nil {
+				return fmt.Errorf("zrange %s: %w", key, err)
+			}
+			var toRemove []interface{}
+			for _, member := range members {
+				for _, dp := range prefixesWithDelim {
+					if strings.HasPrefix(member, dp) {
+						toRemove = append(toRemove, member)
+						break
+					}
+				}
+			}
+			if len(toRemove) > 0 {
+				if err := c.rdb.ZRem(ctx, key, toRemove...).Err(); err != nil {
+					return fmt.Errorf("zrem %s: %w", key, err)
+				}
 			}
 		}
 		cursor = nextCursor

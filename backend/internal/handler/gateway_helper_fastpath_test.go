@@ -92,6 +92,14 @@ func (m *concurrencyCacheMock) CleanupExpiredAccountSlots(ctx context.Context, a
 func (m *concurrencyCacheMock) CleanupStaleProcessSlots(ctx context.Context, activeRequestPrefix string) error {
 	return nil
 }
+func (m *concurrencyCacheMock) CleanupAllExpiredSlots(context.Context) error              { return nil }
+func (m *concurrencyCacheMock) RegisterInstance(context.Context, string) error             { return nil }
+func (m *concurrencyCacheMock) UnregisterInstance(context.Context, string) error           { return nil }
+func (m *concurrencyCacheMock) FindDeadInstancePrefixes(context.Context, int64) ([]string, error) {
+	return nil, nil
+}
+func (m *concurrencyCacheMock) RemoveDeadInstances(context.Context, []string) error  { return nil }
+func (m *concurrencyCacheMock) CleanupSlotsForPrefixes(context.Context, []string) error { return nil }
 
 func TestConcurrencyHelper_TryAcquireUserSlot(t *testing.T) {
 	cache := &concurrencyCacheMock{
