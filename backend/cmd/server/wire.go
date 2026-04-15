@@ -72,6 +72,7 @@ func provideServiceBuildInfo(buildInfo handler.BuildInfo) service.BuildInfo {
 func provideCleanup(
 	entClient *ent.Client,
 	rdb *redis.Client,
+	concurrency *service.ConcurrencyService,
 	opsMetricsCollector *service.OpsMetricsCollector,
 	opsAggregation *service.OpsAggregationService,
 	opsAlertEvaluator *service.OpsAlertEvaluatorService,
@@ -109,6 +110,12 @@ func provideCleanup(
 
 		// 应用层清理步骤可并行执行，基础设施资源（Redis/Ent）最后按顺序关闭。
 		parallelSteps := []cleanupStep{
+			{"ConcurrencyHeartbeat", func() error {
+				if concurrency != nil {
+					concurrency.StopHeartbeat()
+				}
+				return nil
+			}},
 			{"OpsScheduledReportService", func() error {
 				if opsScheduledReport != nil {
 					opsScheduledReport.Stop()
