@@ -16,7 +16,7 @@ ARG GOSUMDB=sum.golang.google.cn
 # -----------------------------------------------------------------------------
 # Stage 1: Frontend Builder
 # -----------------------------------------------------------------------------
-FROM --platform=linux/amd64${NODE_IMAGE} AS frontend-builder
+FROM --platform=linux/amd64 ${NODE_IMAGE} AS frontend-builder
 
 WORKDIR /app/frontend
 
@@ -34,7 +34,7 @@ RUN pnpm run build
 # -----------------------------------------------------------------------------
 # Stage 2: Backend Builder
 # -----------------------------------------------------------------------------
-FROM --platform=linux/amd64${GOLANG_IMAGE} AS backend-builder
+FROM --platform=linux/amd64 ${GOLANG_IMAGE} AS backend-builder
 
 # Build arguments for version info (set by CI)
 ARG VERSION=
@@ -76,12 +76,12 @@ RUN VERSION_VALUE="${VERSION}" && \
 # -----------------------------------------------------------------------------
 # Stage 3: PostgreSQL Client (version-matched with docker-compose)
 # -----------------------------------------------------------------------------
-FROM --platform=linux/amd64${POSTGRES_IMAGE} AS pg-client
+FROM --platform=linux/amd64 ${POSTGRES_IMAGE} AS pg-client
 
 # -----------------------------------------------------------------------------
 # Stage 4: Final Runtime Image
 # -----------------------------------------------------------------------------
-FROM --platform=linux/amd64${ALPINE_IMAGE}
+FROM --platform=linux/amd64 ${ALPINE_IMAGE}
 
 # Labels
 LABEL maintainer="Wei-Shaw <github.com/Wei-Shaw>"
