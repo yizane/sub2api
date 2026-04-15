@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"os"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -46,6 +47,21 @@ type ConcurrencyCache interface {
 
 	// 启动时清理旧进程遗留槽位与等待计数
 	CleanupStaleProcessSlots(ctx context.Context, activeRequestPrefix string) error
+
+	// 按 TTL 清理所有过期槽位（多实例安全，不依赖 requestID prefix）
+	CleanupAllExpiredSlots(ctx context.Context) error
+
+	// ---- 实例心跳（多副本安全清理） ----
+	// RegisterInstance 注册当前实例 prefix，score = 当前时间戳
+	RegisterInstance(ctx context.Context, prefix string) error
+	// UnregisterInstance 注销当前实例
+	UnregisterInstance(ctx context.Context, prefix string) error
+	// FindDeadInstancePrefixes 返回心跳超时的实例 prefix 列表
+	FindDeadInstancePrefixes(ctx context.Context, heartbeatTimeout int64) ([]string, error)
+	// RemoveDeadInstances 从注册表中移除已死实例
+	RemoveDeadInstances(ctx context.Context, prefixes []string) error
+	// CleanupSlotsForPrefixes 清理指定 prefix 列表的槽位和等待计数器
+	CleanupSlotsForPrefixes(ctx context.Context, deadPrefixes []string) error
 }
 
 var (
@@ -78,6 +94,79 @@ func (s *ConcurrencyService) CleanupStaleProcessSlots(ctx context.Context) error
 	return s.cache.CleanupStaleProcessSlots(ctx, RequestIDPrefix())
 }
 
+// CleanupAllExpiredSlots removes expired slots across all accounts/users by TTL.
+// Unlike CleanupStaleProcessSlots, this is safe for multi-instance deployment
+// because it never touches another pod's active (non-expired) slots.
+func (s *ConcurrencyService) CleanupAllExpiredSlots(ctx context.Context) error {
+	if s == nil || s.cache == nil {
+		return nil
+	}
+	return s.cache.CleanupAllExpiredSlots(ctx)
+}
+
+const (
+	instanceHeartbeatInterval = 10 * time.Second
+	instanceHeartbeatTimeout  = 30 // seconds — instance considered dead after this
+)
+
+// StartInstanceHeartbeat registers the current process prefix in Redis and
+// periodically refreshes the heartbeat. On startup it also discovers dead
+// instances and cleans up their stale slots/wait-counters.
+// This is the multi-instance-safe replacement for CleanupStaleProcessSlots.
+func (s *ConcurrencyService) StartInstanceHeartbeat(ctx context.Context) {
+	if s == nil || s.cache == nil {
+		return
+	}
+	prefix := RequestIDPrefix()
+
+	// Register self
+	if err := s.cache.RegisterInstance(ctx, prefix); err != nil {
+		logger.LegacyPrintf("service.concurrency", "Warning: failed to register instance: %v", err)
+	}
+
+	// Discover and clean up dead instances
+	deadPrefixes, err := s.cache.FindDeadInstancePrefixes(ctx, instanceHeartbeatTimeout)
+	if err != nil {
+		logger.LegacyPrintf("service.concurrency", "Warning: failed to find dead instances: %v", err)
+	} else if len(deadPrefixes) > 0 {
+		logger.LegacyPrintf("service.concurrency", "Found %d dead instance(s), cleaning up their slots", len(deadPrefixes))
+		if err := s.cache.CleanupSlotsForPrefixes(ctx, deadPrefixes); err != nil {
+			logger.LegacyPrintf("service.concurrency", "Warning: failed to cleanup dead instance slots: %v", err)
+		}
+		if err := s.cache.RemoveDeadInstances(ctx, deadPrefixes); err != nil {
+			logger.LegacyPrintf("service.concurrency", "Warning: failed to remove dead instances: %v", err)
+		}
+	}
+
+	// Heartbeat goroutine
+	go func() {
+		ticker := time.NewTicker(instanceHeartbeatInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				hbCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				_ = s.cache.RegisterInstance(hbCtx, prefix)
+				cancel()
+			case <-s.stopCh:
+				// Unregister on shutdown
+				shutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				_ = s.cache.UnregisterInstance(shutCtx, prefix)
+				cancel()
+				return
+			}
+		}
+	}()
+}
+
+// StopHeartbeat stops the heartbeat goroutine.
+func (s *ConcurrencyService) StopHeartbeat() {
+	if s == nil {
+		return
+	}
+	s.stopOnce.Do(func() { close(s.stopCh) })
+}
+
 const (
 	// Default extra wait slots beyond concurrency limit
 	defaultExtraWaitSlots = 20
@@ -85,12 +174,17 @@ const (
 
 // ConcurrencyService manages concurrent request limiting for accounts and users
 type ConcurrencyService struct {
-	cache ConcurrencyCache
+	cache    ConcurrencyCache
+	stopCh   chan struct{} // closed on Stop() to terminate heartbeat goroutine
+	stopOnce sync.Once
 }
 
 // NewConcurrencyService creates a new ConcurrencyService
 func NewConcurrencyService(cache ConcurrencyCache) *ConcurrencyService {
-	return &ConcurrencyService{cache: cache}
+	return &ConcurrencyService{
+		cache:  cache,
+		stopCh: make(chan struct{}),
+	}
 }
 
 // AcquireResult represents the result of acquiring a concurrency slot
