@@ -1852,6 +1852,15 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 		return nil, errors.New("openai ws v1 is temporarily unsupported; use ws v2")
 	}
+	// Chat Completions 直连模式不支持 /v1/responses 端点，触发 failover 以选择其他账号。
+	if account.IsOpenAIChatCompletionsMode() {
+		return nil, &UpstreamFailoverError{
+			StatusCode:             http.StatusBadRequest,
+			ResponseBody:           []byte(`{"error":{"type":"invalid_request_error","message":"This account is in chat completions mode and does not support /v1/responses"}}`),
+			RetryableOnSameAccount: false,
+		}
+	}
+
 	passthroughEnabled := account.IsOpenAIPassthroughEnabled()
 	if passthroughEnabled {
 		// 透传分支只需要轻量提取字段，避免热路径全量 Unmarshal。
@@ -4174,6 +4183,21 @@ func buildOpenAIResponsesURL(base string) string {
 		return normalized + "/responses"
 	}
 	return normalized + "/v1/responses"
+}
+
+// buildOpenAIChatCompletionsURL 组装 OpenAI Chat Completions 端点。
+// - base 以 /v1 结尾：追加 /chat/completions
+// - base 已是 /chat/completions：原样返回
+// - 其他情况：追加 /v1/chat/completions
+func buildOpenAIChatCompletionsURL(base string) string {
+	normalized := strings.TrimRight(strings.TrimSpace(base), "/")
+	if strings.HasSuffix(normalized, "/chat/completions") {
+		return normalized
+	}
+	if strings.HasSuffix(normalized, "/v1") {
+		return normalized + "/chat/completions"
+	}
+	return normalized + "/v1/chat/completions"
 }
 
 func trimOpenAIEncryptedReasoningItems(reqBody map[string]any) bool {

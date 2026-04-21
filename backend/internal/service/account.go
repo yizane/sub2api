@@ -1019,6 +1019,27 @@ func (a *Account) IsOpenAIPassthroughEnabled() bool {
 	return false
 }
 
+// IsOpenAIChatCompletionsMode 返回 OpenAI API Key 账号是否启用"Chat Completions 直连"模式。
+//
+// 启用后，请求将直接以 /v1/chat/completions 格式转发到 Base URL，
+// 不会转换为 Responses API 格式。适用于 Kimi、DeepSeek 等仅支持
+// /v1/chat/completions 的 OpenAI 兼容第三方 API。
+//
+// 字段：accounts.extra.openai_chat_completions_mode
+// 字段缺失或类型不正确时，按 false（关闭）处理。
+func (a *Account) IsOpenAIChatCompletionsMode() bool {
+	if a == nil || !a.IsOpenAI() || a.Extra == nil {
+		return false
+	}
+	if a.Type != AccountTypeAPIKey {
+		return false
+	}
+	if enabled, ok := a.Extra["openai_chat_completions_mode"].(bool); ok {
+		return enabled
+	}
+	return false
+}
+
 // IsOpenAIResponsesWebSocketV2Enabled 返回 OpenAI 账号是否开启 Responses WebSocket v2。
 //
 // 分类型新字段：

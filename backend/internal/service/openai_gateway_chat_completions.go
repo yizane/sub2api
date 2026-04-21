@@ -52,6 +52,12 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 ) (*OpenAIForwardResult, error) {
 	startTime := time.Now()
 
+	// Chat Completions 直连模式：跳过 Responses API 转换，直接以 Chat Completions
+	// 格式转发到上游。适用于 Kimi、DeepSeek 等仅支持 /v1/chat/completions 的第三方 API。
+	if account.IsOpenAIChatCompletionsMode() {
+		return s.forwardChatCompletionsDirect(ctx, c, account, body, defaultMappedModel, startTime)
+	}
+
 	// 1. Parse Chat Completions request
 	var chatReq apicompat.ChatCompletionsRequest
 	if err := json.Unmarshal(body, &chatReq); err != nil {
@@ -631,6 +637,223 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			c.Writer.Flush()
 		}
 	}
+}
+
+// forwardChatCompletionsDirect 直接以 Chat Completions 格式转发请求到上游，
+// 不做 Responses API 转换。用于 Kimi、DeepSeek 等仅支持 /v1/chat/completions 的第三方 API。
+func (s *OpenAIGatewayService) forwardChatCompletionsDirect(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	body []byte,
+	defaultMappedModel string,
+	startTime time.Time,
+) (*OpenAIForwardResult, error) {
+	// 提取请求元数据
+	reqModel := gjson.GetBytes(body, "model").String()
+	reqStream := gjson.GetBytes(body, "stream").Bool()
+	originalModel := reqModel
+
+	// 模型映射
+	billingModel := resolveOpenAIForwardModel(account, originalModel, defaultMappedModel)
+	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
+
+	// 重写 body 中的 model
+	if upstreamModel != originalModel {
+		var err error
+		body, err = sjson.SetBytes(body, "model", upstreamModel)
+		if err != nil {
+			return nil, fmt.Errorf("rewrite model in chat completions body: %w", err)
+		}
+	}
+
+	logger.L().Debug("openai chat_completions_direct: forwarding",
+		zap.Int64("account_id", account.ID),
+		zap.String("original_model", originalModel),
+		zap.String("billing_model", billingModel),
+		zap.String("upstream_model", upstreamModel),
+		zap.Bool("stream", reqStream),
+	)
+
+	// 获取 access token
+	token, _, err := s.GetAccessToken(ctx, account)
+	if err != nil {
+		return nil, fmt.Errorf("get access token: %w", err)
+	}
+
+	// 构建上游请求 URL
+	baseURL := account.GetOpenAIBaseURL()
+	if baseURL == "" {
+		return nil, fmt.Errorf("chat completions direct mode requires a base URL")
+	}
+	validatedURL, err := s.validateUpstreamBaseURL(baseURL)
+	if err != nil {
+		return nil, err
+	}
+	targetURL := buildOpenAIChatCompletionsURL(validatedURL)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", targetURL, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("build upstream request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+
+	// 代理
+	proxyURL := ""
+	if account.Proxy != nil {
+		proxyURL = account.Proxy.URL()
+	}
+
+	setOpsUpstreamRequestBody(c, body)
+	upstreamStart := time.Now()
+	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
+	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
+	if err != nil {
+		safeErr := sanitizeUpstreamErrorMessage(err.Error())
+		setOpsUpstreamError(c, 0, safeErr, "")
+		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+			Platform:           account.Platform,
+			AccountID:          account.ID,
+			AccountName:        account.Name,
+			UpstreamStatusCode: 0,
+			Kind:               "request_error",
+			Message:            safeErr,
+		})
+		writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", "Upstream request failed")
+		return nil, fmt.Errorf("upstream request failed: %s", safeErr)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	// 错误处理
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+		_ = resp.Body.Close()
+		resp.Body = io.NopCloser(bytes.NewReader(respBody))
+
+		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
+		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
+		if s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMsg, respBody) {
+			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+				Platform:           account.Platform,
+				AccountID:          account.ID,
+				AccountName:        account.Name,
+				UpstreamStatusCode: resp.StatusCode,
+				UpstreamRequestID:  resp.Header.Get("x-request-id"),
+				Kind:               "failover",
+				Message:            upstreamMsg,
+			})
+			if s.rateLimitService != nil {
+				s.rateLimitService.HandleUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
+			}
+			return nil, &UpstreamFailoverError{
+				StatusCode:             resp.StatusCode,
+				ResponseBody:           respBody,
+				RetryableOnSameAccount: false,
+			}
+		}
+		return s.handleChatCompletionsErrorResponse(resp, c, account)
+	}
+
+	// 复制上游响应头（x-request-id、rate-limit 等），在写入我们自己的头之前调用
+	if s.responseHeaderFilter != nil {
+		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+	}
+
+	// 直接透传响应（上游已是 Chat Completions 格式）
+	var usage OpenAIUsage
+	var firstTokenMs *int
+	if reqStream {
+		// 流式：直接透传 SSE
+		c.Writer.Header().Set("Content-Type", "text/event-stream")
+		c.Writer.Header().Set("Cache-Control", "no-cache")
+		c.Writer.Header().Set("Connection", "keep-alive")
+		c.Writer.WriteHeader(resp.StatusCode)
+		c.Writer.Flush()
+
+		scanner := bufio.NewScanner(resp.Body)
+		maxLineSize := defaultMaxLineSize
+		if s.cfg != nil && s.cfg.Gateway.MaxLineSize > 0 {
+			maxLineSize = s.cfg.Gateway.MaxLineSize
+		}
+		scanner.Buffer(make([]byte, 0, 64*1024), maxLineSize)
+
+		firstChunk := true
+		sawDone := false
+		for scanner.Scan() {
+			line := scanner.Text()
+			if _, werr := fmt.Fprintf(c.Writer, "%s\n", line); werr != nil {
+				return &OpenAIForwardResult{
+					Model:         originalModel,
+					BillingModel:  billingModel,
+					UpstreamModel: upstreamModel,
+					Usage:         usage,
+					Stream:        true,
+					Duration:      time.Since(startTime),
+				}, nil
+			}
+			c.Writer.Flush()
+			if firstChunk {
+				firstChunk = false
+				ms := int(time.Since(startTime).Milliseconds())
+				firstTokenMs = &ms
+			}
+			// 尝试从 SSE data 中提取 usage
+			if strings.HasPrefix(line, "data: ") {
+				data := line[6:]
+				if data == "[DONE]" {
+					sawDone = true
+				} else if u := gjson.Get(data, "usage"); u.Exists() {
+					usage.InputTokens = int(u.Get("prompt_tokens").Int())
+					usage.OutputTokens = int(u.Get("completion_tokens").Int())
+				}
+			}
+		}
+
+		// 检测截断的流（scanner 错误或未收到 [DONE] 标记）
+		if err := scanner.Err(); err != nil {
+			if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+				logger.L().Warn("openai chat_completions_direct stream: read error",
+					zap.Error(err),
+					zap.Int64("account_id", account.ID),
+				)
+			}
+			return nil, fmt.Errorf("upstream stream read error: %w", err)
+		}
+		if !sawDone {
+			logger.L().Warn("openai chat_completions_direct stream: truncated (no [DONE])",
+				zap.Int64("account_id", account.ID),
+			)
+			return nil, fmt.Errorf("upstream stream ended without [DONE] sentinel")
+		}
+	} else {
+		// 非流式：直接透传 JSON
+		c.Writer.Header().Set("Content-Type", "application/json")
+		c.Writer.WriteHeader(resp.StatusCode)
+		respBody, err := io.ReadAll(io.LimitReader(resp.Body, 50<<20))
+		if err != nil {
+			return nil, fmt.Errorf("read upstream response: %w", err)
+		}
+		if _, werr := c.Writer.Write(respBody); werr != nil {
+			return nil, fmt.Errorf("write response to client: %w", werr)
+		}
+		// 提取 usage
+		if u := gjson.GetBytes(respBody, "usage"); u.Exists() {
+			usage.InputTokens = int(u.Get("prompt_tokens").Int())
+			usage.OutputTokens = int(u.Get("completion_tokens").Int())
+		}
+	}
+
+	return &OpenAIForwardResult{
+		RequestID:     resp.Header.Get("x-request-id"),
+		Model:         originalModel,
+		BillingModel:  billingModel,
+		UpstreamModel: upstreamModel,
+		Usage:         usage,
+		Stream:        reqStream,
+		Duration:      time.Since(startTime),
+		FirstTokenMs:  firstTokenMs,
+	}, nil
 }
 
 // writeChatCompletionsError writes an error response in OpenAI Chat Completions format.

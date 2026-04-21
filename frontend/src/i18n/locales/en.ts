@@ -2472,6 +2472,9 @@ export default {
         oauthPassthrough: 'Auto passthrough (auth only)',
         oauthPassthroughDesc:
           'When enabled, this OpenAI account uses automatic passthrough: the gateway forwards request/response as-is and only swaps auth, while keeping billing/concurrency/audit and necessary safety filtering.',
+        chatCompletionsMode: 'Chat Completions Direct Mode',
+        chatCompletionsModeDesc:
+          'When enabled, requests are forwarded directly to the Base URL as /v1/chat/completions without converting to Responses API format. Use this for third-party OpenAI-compatible APIs (e.g. Kimi, DeepSeek) that only support /v1/chat/completions.',
         responsesWebsocketsV2: 'Responses WebSocket v2',
         responsesWebsocketsV2Desc:
           'Disabled by default. Enable to allow responses_websockets_v2 capability (still gated by global and account-type switches).',

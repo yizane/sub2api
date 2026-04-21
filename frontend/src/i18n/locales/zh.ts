@@ -2622,6 +2622,9 @@ export default {
         oauthPassthrough: '自动透传（仅替换认证）',
         oauthPassthroughDesc:
           '开启后，该 OpenAI 账号将自动透传请求与响应，仅替换认证并保留计费/并发/审计及必要安全过滤；如遇兼容性问题可随时关闭回滚。',
+        chatCompletionsMode: 'Chat Completions 直连模式',
+        chatCompletionsModeDesc:
+          '开启后，请求将直接以 /v1/chat/completions 格式转发到 Base URL，不会转换为 Responses API 格式。适用于 Kimi、DeepSeek 等仅支持 /v1/chat/completions 的 OpenAI 兼容第三方 API。',
         responsesWebsocketsV2: 'Responses WebSocket v2',
         responsesWebsocketsV2Desc:
           '默认关闭。开启后可启用 responses_websockets_v2 协议能力（受网关全局开关与账号类型开关约束）。',
