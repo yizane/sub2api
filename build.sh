@@ -24,5 +24,6 @@ docker buildx build \
 
 echo ""
 echo "Done: ${REGISTRY}:${VERSION}"
-docker buildx imagetools inspect "${REGISTRY}:${VERSION}" \
-  --format "Platform: {{range .Manifests}}{{if eq .MediaType \"application/vnd.oci.image.manifest.v1+json\"}}{{.Platform.OS}}/{{.Platform.Architecture}}{{end}}{{end}}"
+echo ""
+echo "Verifying manifest platform (expect linux/amd64):"
+docker buildx imagetools inspect "${REGISTRY}:${VERSION}" | grep -E "^  Platform:" | grep -v "unknown/unknown"
