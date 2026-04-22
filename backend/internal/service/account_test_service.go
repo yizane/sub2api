@@ -931,6 +931,9 @@ func (s *AccountTestService) processGeminiStream(c *gin.Context, body io.Reader)
 
 // createOpenAIChatCompletionsTestPayload creates a minimal test payload for Chat Completions API.
 // Used when the account has Chat Completions direct mode enabled (e.g. Kimi, DeepSeek).
+// max_tokens is intentionally omitted — reasoning models (e.g. kimi-k2) consume tokens
+// for their chain-of-thought before producing visible content, so a tight limit would
+// exhaust the budget on reasoning and leave the content field empty.
 func createOpenAIChatCompletionsTestPayload(modelID string) map[string]any {
 	return map[string]any{
 		"model": modelID,
@@ -940,8 +943,7 @@ func createOpenAIChatCompletionsTestPayload(modelID string) map[string]any {
 				"content": "hi",
 			},
 		},
-		"stream":     true,
-		"max_tokens": 10,
+		"stream": true,
 	}
 }
 
@@ -1113,11 +1115,14 @@ func (s *AccountTestService) processOpenAIChatCompletionsStream(c *gin.Context, 
 		}
 
 		// Chat Completions format: choices[0].delta.content
+		// Also handle reasoning_content for thinking models (e.g. kimi-k2, DeepSeek-R1).
 		if choices, ok := data["choices"].([]any); ok && len(choices) > 0 {
 			if choice, ok := choices[0].(map[string]any); ok {
 				if delta, ok := choice["delta"].(map[string]any); ok {
 					if content, ok := delta["content"].(string); ok && content != "" {
 						s.sendEvent(c, TestEvent{Type: "content", Text: content})
+					} else if reasoning, ok := delta["reasoning_content"].(string); ok && reasoning != "" {
+						s.sendEvent(c, TestEvent{Type: "content", Text: reasoning})
 					}
 				}
 			}
