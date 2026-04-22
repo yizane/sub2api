@@ -473,15 +473,28 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 			return s.sendErrorAndEnd(c, "No API key available")
 		}
 
-		baseURL := account.GetOpenAIBaseURL()
-		if baseURL == "" {
-			baseURL = "https://api.openai.com"
+		baseURL := strings.TrimSpace(account.GetCredential("base_url"))
+		// Chat Completions direct mode requires an explicit base URL — fail fast
+		// to match the runtime behavior of forwardChatCompletionsDirect.
+		if account.IsOpenAIChatCompletionsMode() {
+			if baseURL == "" {
+				return s.sendErrorAndEnd(c, "Chat Completions direct mode requires a base URL")
+			}
+			normalizedBaseURL, err := s.validateUpstreamBaseURL(baseURL)
+			if err != nil {
+				return s.sendErrorAndEnd(c, fmt.Sprintf("Invalid base URL: %s", err.Error()))
+			}
+			apiURL = buildOpenAIChatCompletionsURL(normalizedBaseURL)
+		} else {
+			if baseURL == "" {
+				baseURL = "https://api.openai.com"
+			}
+			normalizedBaseURL, err := s.validateUpstreamBaseURL(baseURL)
+			if err != nil {
+				return s.sendErrorAndEnd(c, fmt.Sprintf("Invalid base URL: %s", err.Error()))
+			}
+			apiURL = strings.TrimSuffix(normalizedBaseURL, "/") + "/responses"
 		}
-		normalizedBaseURL, err := s.validateUpstreamBaseURL(baseURL)
-		if err != nil {
-			return s.sendErrorAndEnd(c, fmt.Sprintf("Invalid base URL: %s", err.Error()))
-		}
-		apiURL = strings.TrimSuffix(normalizedBaseURL, "/") + "/responses"
 	} else {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Unsupported account type: %s", account.Type))
 	}
@@ -493,9 +506,13 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	c.Writer.Header().Set("X-Accel-Buffering", "no")
 	c.Writer.Flush()
 
-	// Create OpenAI Responses API payload
-	payload := createOpenAITestPayload(testModelID, isOAuth)
-	payloadBytes, _ := json.Marshal(payload)
+	// Create test payload — Chat Completions format for direct mode, Responses API format otherwise
+	var payloadBytes []byte
+	if account.IsOpenAIChatCompletionsMode() {
+		payloadBytes, _ = json.Marshal(createOpenAIChatCompletionsTestPayload(testModelID))
+	} else {
+		payloadBytes, _ = json.Marshal(createOpenAITestPayload(testModelID, isOAuth))
+	}
 
 	// Send test_start event
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
@@ -547,7 +564,10 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body)))
 	}
 
-	// Process SSE stream
+	// Process SSE stream — Chat Completions direct mode uses different event format
+	if account.IsOpenAIChatCompletionsMode() {
+		return s.processOpenAIChatCompletionsStream(c, resp.Body)
+	}
 	return s.processOpenAIStream(c, resp.Body)
 }
 
@@ -909,6 +929,22 @@ func (s *AccountTestService) processGeminiStream(c *gin.Context, body io.Reader)
 	}
 }
 
+// createOpenAIChatCompletionsTestPayload creates a minimal test payload for Chat Completions API.
+// Used when the account has Chat Completions direct mode enabled (e.g. Kimi, DeepSeek).
+func createOpenAIChatCompletionsTestPayload(modelID string) map[string]any {
+	return map[string]any{
+		"model": modelID,
+		"messages": []map[string]any{
+			{
+				"role":    "user",
+				"content": "hi",
+			},
+		},
+		"stream":     true,
+		"max_tokens": 10,
+	}
+}
+
 // createOpenAITestPayload creates a test payload for OpenAI Responses API
 func createOpenAITestPayload(modelID string, isOAuth bool) map[string]any {
 	payload := map[string]any{
@@ -1039,6 +1075,59 @@ func (s *AccountTestService) processOpenAIStream(c *gin.Context, body io.Reader)
 				if msg, ok := errData["message"].(string); ok {
 					errorMsg = msg
 				}
+			}
+			return s.sendErrorAndEnd(c, errorMsg)
+		}
+	}
+}
+
+// processOpenAIChatCompletionsStream processes the SSE stream from Chat Completions API.
+// Used when the account has Chat Completions direct mode enabled (e.g. Kimi, DeepSeek).
+func (s *AccountTestService) processOpenAIChatCompletionsStream(c *gin.Context, body io.Reader) error {
+	reader := bufio.NewReader(body)
+
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			if err == io.EOF {
+				s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
+				return nil
+			}
+			return s.sendErrorAndEnd(c, fmt.Sprintf("Stream read error: %s", err.Error()))
+		}
+
+		line = strings.TrimSpace(line)
+		if line == "" || !sseDataPrefix.MatchString(line) {
+			continue
+		}
+
+		jsonStr := sseDataPrefix.ReplaceAllString(line, "")
+		if jsonStr == "[DONE]" {
+			s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
+			return nil
+		}
+
+		var data map[string]any
+		if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
+			continue
+		}
+
+		// Chat Completions format: choices[0].delta.content
+		if choices, ok := data["choices"].([]any); ok && len(choices) > 0 {
+			if choice, ok := choices[0].(map[string]any); ok {
+				if delta, ok := choice["delta"].(map[string]any); ok {
+					if content, ok := delta["content"].(string); ok && content != "" {
+						s.sendEvent(c, TestEvent{Type: "content", Text: content})
+					}
+				}
+			}
+		}
+
+		// Check for error field
+		if errData, ok := data["error"].(map[string]any); ok {
+			errorMsg := "Unknown error"
+			if msg, ok := errData["message"].(string); ok {
+				errorMsg = msg
 			}
 			return s.sendErrorAndEnd(c, errorMsg)
 		}

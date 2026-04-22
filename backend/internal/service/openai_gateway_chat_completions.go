@@ -682,7 +682,7 @@ func (s *OpenAIGatewayService) forwardChatCompletionsDirect(
 	}
 
 	// 构建上游请求 URL
-	baseURL := account.GetOpenAIBaseURL()
+	baseURL := strings.TrimSpace(account.GetCredential("base_url"))
 	if baseURL == "" {
 		return nil, fmt.Errorf("chat completions direct mode requires a base URL")
 	}
