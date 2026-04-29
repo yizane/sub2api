@@ -321,6 +321,7 @@ func newTierTestOpenAIWSRouteHandler(t *testing.T, groups map[int64]*service.Gro
 		nil,
 		nil,
 		nil,
+		nil,
 	)
 	tierSvc := service.NewGatewayService(
 		nil,
