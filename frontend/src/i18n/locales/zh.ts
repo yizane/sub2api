@@ -773,6 +773,14 @@ export default {
     currentExpiration: '当前过期时间',
     expiresAt: '过期时间',
     noExpiration: '永久有效',
+    tierFallbackChain: 'Tier 降级链',
+    selectTierGroup: '选择降级分组',
+    addTierGroup: '添加降级分组',
+    tierFallbackHint: '仅当主分组所有账号都失败时启用。',
+    tierFallbackRequiresPrimaryGroup: '请先选择主分组，再配置 Tier 降级链。',
+    tierFallbackOpenAIOnly: 'Tier 降级链仅支持 OpenAI 主分组。',
+    maxTierDepth: '最大深度',
+    maxTierDepthHint: '0 = 不限制',
     status: {
       active: '活跃',
       inactive: '已停用',
@@ -1768,7 +1776,9 @@ export default {
         selectStatus: '选择状态',
         rpmLimit: '每分钟请求数 (RPM)',
         rpmLimitPlaceholder: '0 表示不限制',
-        rpmLimitHint: '该用户每分钟最大请求数，0 = 不限制；仅在所用分组未设置 rpm_limit 时作为兜底生效'
+        rpmLimitHint: '该用户每分钟最大请求数，0 = 不限制；仅在所用分组未设置 rpm_limit 时作为兜底生效',
+        defaultTierGroupIds: '默认 Tier 降级链',
+        defaultTierGroupIdsHint: '用户级默认降级链路，当 key 未单独配置时使用。'
       },
       adjustBalance: '调整余额',
       adjustConcurrency: '调整并发数',
@@ -2122,6 +2132,11 @@ export default {
         title: '无效请求兜底分组',
         hint: '仅当上游明确返回 prompt too long 时才会触发，留空表示不兜底',
         noFallback: '不兜底'
+      },
+      tierFallback: {
+        title: 'Tier 降级链单指针',
+        hint: '独立于 CCO 降级分组。仅当该分组账号被 tier 降级链耗尽时才会触发。',
+        noFallback: '不设置'
       },
       copyAccounts: {
         title: '从分组复制账号',
@@ -5616,6 +5631,14 @@ export default {
           testSuccess: 'Google Drive 存储测试成功（上传、访问、删除均正常）',
           testFailed: 'Google Drive 存储测试失败'
         }
+      },
+      defaultTierGroupIds: {
+        title: '系统默认降级链路',
+        description: '全局默认降级分组链路，当 Key 和用户均未配置链路时生效。',
+        hint: '拖拽排序。仅在当前分组所有账号均失败后触发。',
+        loadFailed: '加载系统默认降级链路失败，在成功读取最新配置前已禁用保存。',
+        saved: '系统默认降级链路保存成功',
+        saveFailed: '保存系统默认降级链路失败'
       },
       overloadCooldown: {
         title: '529 过载冷却',

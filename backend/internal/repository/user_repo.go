@@ -94,6 +94,7 @@ func (r *userRepository) Create(ctx context.Context, userIn *service.User) error
 		SetNillableLastLoginAt(userIn.LastLoginAt).
 		SetNillableLastActiveAt(userIn.LastActiveAt).
 		SetRpmLimit(userIn.RPMLimit).
+		SetDefaultTierGroupIds(coalesceInt64Slice(userIn.DefaultTierGroupIDs)).
 		Save(txCtx)
 	if err != nil {
 		return translatePersistenceError(err, nil, service.ErrEmailExists)
@@ -221,7 +222,8 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User) error
 		SetNillableBalanceNotifyThreshold(userIn.BalanceNotifyThreshold).
 		SetBalanceNotifyExtraEmails(marshalExtraEmails(userIn.BalanceNotifyExtraEmails)).
 		SetTotalRecharged(userIn.TotalRecharged).
-		SetRpmLimit(userIn.RPMLimit)
+		SetRpmLimit(userIn.RPMLimit).
+		SetDefaultTierGroupIds(coalesceInt64Slice(userIn.DefaultTierGroupIDs))
 	if userIn.SignupSource != "" {
 		updateOp = updateOp.SetSignupSource(userIn.SignupSource)
 	}
@@ -978,4 +980,14 @@ func (r *userRepository) DisableTotp(ctx context.Context, userID int64) error {
 		return translatePersistenceError(err, service.ErrUserNotFound, nil)
 	}
 	return nil
+}
+
+// coalesceInt64Slice 把 nil slice 替换为空切片。
+// 用于 JSONB 数组字段的写入路径——保证持久化的总是 [] 而非 null，
+// 与迁移文件中 DEFAULT '[]'::jsonb 的语义一致。
+func coalesceInt64Slice(s []int64) []int64 {
+	if s == nil {
+		return []int64{}
+	}
+	return s
 }

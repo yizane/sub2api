@@ -438,6 +438,45 @@ func (_u *APIKeyUpdate) ClearWindow7dStart() *APIKeyUpdate {
 	return _u
 }
 
+// SetTierGroupIds sets the "tier_group_ids" field.
+func (_u *APIKeyUpdate) SetTierGroupIds(v []int64) *APIKeyUpdate {
+	_u.mutation.SetTierGroupIds(v)
+	return _u
+}
+
+// AppendTierGroupIds appends value to the "tier_group_ids" field.
+func (_u *APIKeyUpdate) AppendTierGroupIds(v []int64) *APIKeyUpdate {
+	_u.mutation.AppendTierGroupIds(v)
+	return _u
+}
+
+// ClearTierGroupIds clears the value of the "tier_group_ids" field.
+func (_u *APIKeyUpdate) ClearTierGroupIds() *APIKeyUpdate {
+	_u.mutation.ClearTierGroupIds()
+	return _u
+}
+
+// SetMaxTierDepth sets the "max_tier_depth" field.
+func (_u *APIKeyUpdate) SetMaxTierDepth(v int) *APIKeyUpdate {
+	_u.mutation.ResetMaxTierDepth()
+	_u.mutation.SetMaxTierDepth(v)
+	return _u
+}
+
+// SetNillableMaxTierDepth sets the "max_tier_depth" field if the given value is not nil.
+func (_u *APIKeyUpdate) SetNillableMaxTierDepth(v *int) *APIKeyUpdate {
+	if v != nil {
+		_u.SetMaxTierDepth(*v)
+	}
+	return _u
+}
+
+// AddMaxTierDepth adds value to the "max_tier_depth" field.
+func (_u *APIKeyUpdate) AddMaxTierDepth(v int) *APIKeyUpdate {
+	_u.mutation.AddMaxTierDepth(v)
+	return _u
+}
+
 // SetUser sets the "user" edge to the User entity.
 func (_u *APIKeyUpdate) SetUser(v *User) *APIKeyUpdate {
 	return _u.SetUserID(v.ID)
@@ -695,6 +734,23 @@ func (_u *APIKeyUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if _u.mutation.Window7dStartCleared() {
 		_spec.ClearField(apikey.FieldWindow7dStart, field.TypeTime)
+	}
+	if value, ok := _u.mutation.TierGroupIds(); ok {
+		_spec.SetField(apikey.FieldTierGroupIds, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedTierGroupIds(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, apikey.FieldTierGroupIds, value)
+		})
+	}
+	if _u.mutation.TierGroupIdsCleared() {
+		_spec.ClearField(apikey.FieldTierGroupIds, field.TypeJSON)
+	}
+	if value, ok := _u.mutation.MaxTierDepth(); ok {
+		_spec.SetField(apikey.FieldMaxTierDepth, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedMaxTierDepth(); ok {
+		_spec.AddField(apikey.FieldMaxTierDepth, field.TypeInt, value)
 	}
 	if _u.mutation.UserCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -1225,6 +1281,45 @@ func (_u *APIKeyUpdateOne) ClearWindow7dStart() *APIKeyUpdateOne {
 	return _u
 }
 
+// SetTierGroupIds sets the "tier_group_ids" field.
+func (_u *APIKeyUpdateOne) SetTierGroupIds(v []int64) *APIKeyUpdateOne {
+	_u.mutation.SetTierGroupIds(v)
+	return _u
+}
+
+// AppendTierGroupIds appends value to the "tier_group_ids" field.
+func (_u *APIKeyUpdateOne) AppendTierGroupIds(v []int64) *APIKeyUpdateOne {
+	_u.mutation.AppendTierGroupIds(v)
+	return _u
+}
+
+// ClearTierGroupIds clears the value of the "tier_group_ids" field.
+func (_u *APIKeyUpdateOne) ClearTierGroupIds() *APIKeyUpdateOne {
+	_u.mutation.ClearTierGroupIds()
+	return _u
+}
+
+// SetMaxTierDepth sets the "max_tier_depth" field.
+func (_u *APIKeyUpdateOne) SetMaxTierDepth(v int) *APIKeyUpdateOne {
+	_u.mutation.ResetMaxTierDepth()
+	_u.mutation.SetMaxTierDepth(v)
+	return _u
+}
+
+// SetNillableMaxTierDepth sets the "max_tier_depth" field if the given value is not nil.
+func (_u *APIKeyUpdateOne) SetNillableMaxTierDepth(v *int) *APIKeyUpdateOne {
+	if v != nil {
+		_u.SetMaxTierDepth(*v)
+	}
+	return _u
+}
+
+// AddMaxTierDepth adds value to the "max_tier_depth" field.
+func (_u *APIKeyUpdateOne) AddMaxTierDepth(v int) *APIKeyUpdateOne {
+	_u.mutation.AddMaxTierDepth(v)
+	return _u
+}
+
 // SetUser sets the "user" edge to the User entity.
 func (_u *APIKeyUpdateOne) SetUser(v *User) *APIKeyUpdateOne {
 	return _u.SetUserID(v.ID)
@@ -1512,6 +1607,23 @@ func (_u *APIKeyUpdateOne) sqlSave(ctx context.Context) (_node *APIKey, err erro
 	}
 	if _u.mutation.Window7dStartCleared() {
 		_spec.ClearField(apikey.FieldWindow7dStart, field.TypeTime)
+	}
+	if value, ok := _u.mutation.TierGroupIds(); ok {
+		_spec.SetField(apikey.FieldTierGroupIds, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedTierGroupIds(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, apikey.FieldTierGroupIds, value)
+		})
+	}
+	if _u.mutation.TierGroupIdsCleared() {
+		_spec.ClearField(apikey.FieldTierGroupIds, field.TypeJSON)
+	}
+	if value, ok := _u.mutation.MaxTierDepth(); ok {
+		_spec.SetField(apikey.FieldMaxTierDepth, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedMaxTierDepth(); ok {
+		_spec.AddField(apikey.FieldMaxTierDepth, field.TypeInt, value)
 	}
 	if _u.mutation.UserCleared() {
 		edge := &sqlgraph.EdgeSpec{

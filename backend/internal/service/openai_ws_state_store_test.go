@@ -193,6 +193,22 @@ func (c *openAIWSStateStoreTimeoutProbeCache) DeleteSessionAccountID(ctx context
 	return nil
 }
 
+func (c *openAIWSStateStoreTimeoutProbeCache) GetTierStickyGroupID(_ context.Context, _ int64, _ string) (int64, error) {
+	return 0, nil
+}
+
+func (c *openAIWSStateStoreTimeoutProbeCache) SetTierStickyGroupID(_ context.Context, _ int64, _ string, _ int64, _ time.Duration) error {
+	return nil
+}
+
+func (c *openAIWSStateStoreTimeoutProbeCache) RefreshTierStickyTTL(_ context.Context, _ int64, _ string, _ time.Duration) error {
+	return nil
+}
+
+func (c *openAIWSStateStoreTimeoutProbeCache) DeleteTierStickyGroupID(_ context.Context, _ int64, _ string) error {
+	return nil
+}
+
 func TestOpenAIWSStateStore_RedisOpsUseShortTimeout(t *testing.T) {
 	probe := &openAIWSStateStoreTimeoutProbeCache{}
 	store := NewOpenAIWSStateStore(probe)

@@ -28,6 +28,7 @@ import (
 // OpenAIGatewayHandler handles OpenAI API gateway requests
 type OpenAIGatewayHandler struct {
 	gatewayService          *service.OpenAIGatewayService
+	tierService             *service.GatewayService // tier fallback 专用（ResolveNextTier / sticky 等）
 	billingCacheService     *service.BillingCacheService
 	apiKeyService           *service.APIKeyService
 	usageRecordWorkerPool   *service.UsageRecordWorkerPool
@@ -35,6 +36,222 @@ type OpenAIGatewayHandler struct {
 	concurrencyHelper       *ConcurrencyHelper
 	maxAccountSwitches      int
 	cfg                     *config.Config
+}
+
+// openAITierSwapState 跟踪 OpenAI handler 内 tier 降级链路状态。
+type openAITierSwapState struct {
+	originalAPIKey     *service.APIKey
+	visited            []int64
+	depth              int
+	currentSub         *service.UserSubscription
+	restoredFromSticky bool
+	stickyNeedsRebind  bool
+	activatedNow       bool
+	activeTierGroupID  *int64
+}
+
+// tryOpenAITierSwap 尝试将 OpenAI 请求降级到下一档 tier group。
+// streamStarted=true 或响应已写出时禁止 swap。
+// 返回 (newAPIKey, ok)；ok=false 时调用方保持原失败行为。
+func (h *OpenAIGatewayHandler) tryOpenAITierSwap(c *gin.Context, state *openAITierSwapState, streamStarted bool) (*service.APIKey, bool) {
+	if state == nil || state.originalAPIKey == nil || h.tierService == nil {
+		return nil, false
+	}
+	if streamStarted || c.Writer.Size() > 0 {
+		return nil, false
+	}
+	ctx := c.Request.Context()
+	for {
+		grp, resolvedID, err := h.tierService.ResolveNextTier(ctx, state.originalAPIKey, state.visited, state.depth)
+		if err != nil || grp == nil {
+			return nil, false
+		}
+		newAPIKey := cloneAPIKeyWithGroup(state.originalAPIKey, grp)
+		var tierSub *service.UserSubscription
+		if newAPIKey.User != nil {
+			tierSub = h.tierService.GetActiveSubscriptionForGroup(ctx, newAPIKey.User.ID, grp.ID)
+		}
+		if grp.IsSubscriptionType() && tierSub == nil {
+			state.visited = appendTierVisited(state.visited, grp.ID, resolvedID)
+			continue
+		}
+		if billingErr := h.billingCacheService.CheckBillingEligibility(ctx, newAPIKey.User, newAPIKey, grp, tierSub); billingErr != nil {
+			state.visited = appendTierVisited(state.visited, grp.ID, resolvedID)
+			continue
+		}
+		if state.originalAPIKey.GroupID != nil && state.depth == 0 {
+			state.visited = append(state.visited, *state.originalAPIKey.GroupID)
+		}
+		state.depth++
+		state.visited = appendTierVisited(state.visited, grp.ID, resolvedID)
+		state.currentSub = tierSub
+		state.activatedNow = true
+		state.activeTierGroupID = &grp.ID
+		return newAPIKey, true
+	}
+}
+
+// restoreOpenAITierFromSticky 在请求开始时尝试从 Redis 粘性恢复到上次激活的 tier group。
+// 命中且 group 仍有效 → 返回替换 apiKey + true；否则清理粘性返回 (nil, false)。
+func (h *OpenAIGatewayHandler) restoreOpenAITierFromSticky(c *gin.Context, apiKey *service.APIKey, stickyScope string, state *openAITierSwapState, reqLog *zap.Logger) (*service.APIKey, bool) {
+	if apiKey == nil || state == nil || state.originalAPIKey == nil || h.tierService == nil {
+		return nil, false
+	}
+	stickyGroupID := h.tierService.GetCachedTierGroupID(c.Request.Context(), apiKey.ID, stickyScope)
+	if stickyGroupID <= 0 {
+		return nil, false
+	}
+	if apiKey.GroupID != nil && stickyGroupID == *apiKey.GroupID {
+		_ = h.tierService.ClearTierSticky(c.Request.Context(), apiKey.ID, stickyScope)
+		return nil, false
+	}
+	if !h.tierService.IsTierGroupCandidate(c.Request.Context(), apiKey, stickyGroupID) {
+		_ = h.tierService.ClearTierSticky(c.Request.Context(), apiKey.ID, stickyScope)
+		return nil, false
+	}
+	grp, resolvedID, err := h.tierService.ResolveGatewayGroup(c.Request.Context(), &stickyGroupID)
+	if err != nil || grp == nil || resolvedID == nil || !grp.IsActive() {
+		_ = h.tierService.ClearTierSticky(c.Request.Context(), apiKey.ID, stickyScope)
+		return nil, false
+	}
+	if *resolvedID != stickyGroupID {
+		// CCO/fallback 链可能把 sticky 指向的 group 重定向到另一个实际 group。
+		// 清 sticky 让后续请求按解析后的 group 重新建立粘性，但本次请求继续
+		// 复用 resolved group，避免额外再走一次 tier swap。
+		_ = h.tierService.ClearTierSticky(c.Request.Context(), apiKey.ID, stickyScope)
+		state.stickyNeedsRebind = true
+	}
+	// 专属分组权限已被撤销：清理粘性，避免继续路由到无权访问的 group。
+	if grp.IsExclusive && (apiKey.User == nil || !apiKey.User.CanBindGroup(grp.ID, true)) {
+		_ = h.tierService.ClearTierSticky(c.Request.Context(), apiKey.ID, stickyScope)
+		return nil, false
+	}
+	// 查实际深度，拒绝超出 max_tier_depth 的粘性恢复，防止降配后仍访问更深 tier。
+	actualDepth := h.tierService.GetTierGroupDepth(c.Request.Context(), apiKey, stickyGroupID)
+	if actualDepth <= 0 || (apiKey.MaxTierDepth > 0 && actualDepth > apiKey.MaxTierDepth) {
+		_ = h.tierService.ClearTierSticky(c.Request.Context(), apiKey.ID, stickyScope)
+		return nil, false
+	}
+	newAPIKey := cloneAPIKeyWithGroup(apiKey, grp)
+	var tierSub *service.UserSubscription
+	if newAPIKey.User != nil {
+		tierSub = h.tierService.GetActiveSubscriptionForGroup(c.Request.Context(), newAPIKey.User.ID, grp.ID)
+	}
+	if grp.IsSubscriptionType() && tierSub == nil {
+		_ = h.tierService.ClearTierSticky(c.Request.Context(), apiKey.ID, stickyScope)
+		return nil, false
+	}
+	if billingErr := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), newAPIKey.User, newAPIKey, grp, tierSub); billingErr != nil {
+		_ = h.tierService.ClearTierSticky(c.Request.Context(), apiKey.ID, stickyScope)
+		return nil, false
+	}
+	state.visited = h.tierService.ResolveTierVisitedPrefix(c.Request.Context(), apiKey, actualDepth)
+	state.depth = actualDepth
+	state.currentSub = tierSub
+	state.restoredFromSticky = true
+	state.activeTierGroupID = &grp.ID
+	reqLog.Info("openai.tier_sticky_hit",
+		zap.Int64("api_key_id", apiKey.ID),
+		zap.Int64p("primary_group", apiKey.GroupID),
+		zap.Int64("sticky_group", stickyGroupID),
+		zap.Int64("active_group", grp.ID),
+	)
+	return newAPIKey, true
+}
+
+func (h *OpenAIGatewayHandler) persistOpenAITierStickyOnSuccess(c *gin.Context, state *openAITierSwapState, stickyScope string, reqLog *zap.Logger, logPrefix string) {
+	if state == nil || state.originalAPIKey == nil || h.tierService == nil {
+		return
+	}
+	if reqLog == nil {
+		reqLog = zap.NewNop()
+	}
+	if state.activeTierGroupID != nil && (state.activatedNow || state.stickyNeedsRebind) {
+		if err := h.tierService.BindTierSticky(c.Request.Context(), state.originalAPIKey.ID, stickyScope, *state.activeTierGroupID); err != nil {
+			reqLog.Warn(logPrefix+".tier_sticky_set_failed",
+				zap.Int64("api_key_id", state.originalAPIKey.ID),
+				zap.Int64p("group_id", state.activeTierGroupID),
+				zap.Error(err),
+			)
+		}
+		return
+	}
+	if !state.restoredFromSticky {
+		return
+	}
+	if err := h.tierService.RefreshTierSticky(c.Request.Context(), state.originalAPIKey.ID, stickyScope); err != nil {
+		reqLog.Warn(logPrefix+".tier_sticky_refresh_failed",
+			zap.Int64("api_key_id", state.originalAPIKey.ID),
+			zap.Int64p("group_id", state.activeTierGroupID),
+			zap.Error(err),
+		)
+	}
+}
+
+func (h *OpenAIGatewayHandler) selectOpenAIWSInitialRoute(
+	c *gin.Context,
+	apiKey *service.APIKey,
+	subscription *service.UserSubscription,
+	reqModel string,
+	previousResponseID string,
+	firstMessage []byte,
+	reqLog *zap.Logger,
+) (
+	currentAPIKey *service.APIKey,
+	currentSubscription *service.UserSubscription,
+	channelMapping service.ChannelMappingResult,
+	tierState *openAITierSwapState,
+	sessionHash string,
+	selection *service.AccountSelectionResult,
+	scheduleDecision service.OpenAIAccountScheduleDecision,
+	billingErr error,
+	err error,
+) {
+	currentAPIKey = apiKey
+	currentSubscription = subscription
+	channelMapping, _ = h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, reqModel)
+	// Freeze the sticky scope from the ingress primary group + requested model.
+	// Later tier swaps may recompute channel mapping for request rewriting and usage,
+	// but must keep this original sticky key stable across the whole fallback chain.
+	tierStickyScope := resolveTierStickyScope(reqModel, channelMapping)
+	tierState = &openAITierSwapState{originalAPIKey: apiKey}
+	if restored, ok := h.restoreOpenAITierFromSticky(c, apiKey, tierStickyScope, tierState, reqLog); ok {
+		currentAPIKey = restored
+		currentSubscription = tierState.currentSub
+		channelMapping, _ = h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), currentAPIKey.GroupID, reqModel)
+	}
+
+	for {
+		if err = h.billingCacheService.CheckBillingEligibility(c.Request.Context(), currentAPIKey.User, currentAPIKey, currentAPIKey.Group, currentSubscription); err != nil {
+			return currentAPIKey, currentSubscription, channelMapping, tierState, "", nil, service.OpenAIAccountScheduleDecision{}, err, nil
+		}
+
+		sessionHash = h.gatewayService.GenerateSessionHashWithFallback(
+			c,
+			firstMessage,
+			openAIWSIngressFallbackSessionSeed(currentAPIKey.UserID, currentAPIKey.ID, currentAPIKey.GroupID),
+		)
+		selection, scheduleDecision, err = h.gatewayService.SelectAccountWithScheduler(
+			c.Request.Context(),
+			currentAPIKey.GroupID,
+			previousResponseID,
+			sessionHash,
+			reqModel,
+			nil,
+			service.OpenAIUpstreamTransportResponsesWebsocketV2,
+			false,
+		)
+		if err == nil && selection != nil && selection.Account != nil {
+			return currentAPIKey, currentSubscription, channelMapping, tierState, sessionHash, selection, scheduleDecision, nil, nil
+		}
+		if newAPIKey, ok := h.tryOpenAITierSwap(c, tierState, false); ok {
+			currentAPIKey = newAPIKey
+			currentSubscription = tierState.currentSub
+			channelMapping, _ = h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), currentAPIKey.GroupID, reqModel)
+			continue
+		}
+		return currentAPIKey, currentSubscription, channelMapping, tierState, sessionHash, selection, scheduleDecision, nil, err
+	}
 }
 
 func resolveOpenAIForwardDefaultMappedModel(apiKey *service.APIKey, fallbackModel string) string {
@@ -57,6 +274,7 @@ func resolveOpenAIMessagesDispatchMappedModel(apiKey *service.APIKey, requestedM
 // NewOpenAIGatewayHandler creates a new OpenAIGatewayHandler
 func NewOpenAIGatewayHandler(
 	gatewayService *service.OpenAIGatewayService,
+	tierService *service.GatewayService,
 	concurrencyService *service.ConcurrencyService,
 	billingCacheService *service.BillingCacheService,
 	apiKeyService *service.APIKeyService,
@@ -74,6 +292,7 @@ func NewOpenAIGatewayHandler(
 	}
 	return &OpenAIGatewayHandler{
 		gatewayService:          gatewayService,
+		tierService:             tierService,
 		billingCacheService:     billingCacheService,
 		apiKeyService:           apiKeyService,
 		usageRecordWorkerPool:   usageRecordWorkerPool,
@@ -199,6 +418,10 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 
 	// 解析渠道级模型映射
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, reqModel)
+	// Freeze the sticky scope from the ingress primary group + requested model.
+	// Later tier swaps may recompute channel mapping for request rewriting and usage,
+	// but must keep this original sticky key stable across the whole fallback chain.
+	tierStickyScope := resolveTierStickyScope(reqModel, channelMapping)
 
 	// 提前校验 function_call_output 是否具备可关联上下文，避免上游 400。
 	if !h.validateFunctionCallOutputRequest(c, body, reqLog) {
@@ -212,6 +435,17 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 
 	// Get subscription info (may be nil)
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
+	currentSubscription := subscription
+
+	// 尝试从 Redis 粘性恢复到上次激活的 tier group；必须在 billing check 之前，
+	// 以便 CheckBillingEligibility 使用已恢复的 tier group 而非主分组。
+	currentAPIKey := apiKey
+	tierState := &openAITierSwapState{originalAPIKey: apiKey}
+	if restored, ok := h.restoreOpenAITierFromSticky(c, apiKey, tierStickyScope, tierState, reqLog); ok {
+		currentAPIKey = restored
+		currentSubscription = tierState.currentSub
+		channelMapping, _ = h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), currentAPIKey.GroupID, reqModel)
+	}
 
 	service.SetOpsLatencyMs(c, service.OpsAuthLatencyMsKey, time.Since(requestStart).Milliseconds())
 	routingStart := time.Now()
@@ -226,7 +460,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	}
 
 	// 2. Re-check billing eligibility after wait
-	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription); err != nil {
+	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), currentAPIKey.User, currentAPIKey, currentAPIKey.Group, currentSubscription); err != nil {
 		reqLog.Info("openai.billing_eligibility_check_failed", zap.Error(err))
 		status, code, message, retryAfter := billingErrorDetails(err)
 		if retryAfter > 0 {
@@ -251,7 +485,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		reqLog.Debug("openai.account_selecting", zap.Int("excluded_account_count", len(failedAccountIDs)))
 		selection, scheduleDecision, err := h.gatewayService.SelectAccountWithScheduler(
 			c.Request.Context(),
-			apiKey.GroupID,
+			currentAPIKey.GroupID,
 			previousResponseID,
 			sessionHash,
 			reqModel,
@@ -265,12 +499,30 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				zap.Int("excluded_account_count", len(failedAccountIDs)),
 			)
 			if len(failedAccountIDs) == 0 {
+				// 0 候选（整组封停）→ 先尝试 tier 降级
+				if newKey, ok := h.tryOpenAITierSwap(c, tierState, streamStarted); ok {
+					currentAPIKey = newKey
+					currentSubscription = tierState.currentSub
+					channelMapping, _ = h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), currentAPIKey.GroupID, reqModel)
+					failedAccountIDs = make(map[int64]struct{})
+					switchCount = 0
+					continue
+				}
 				if errors.Is(err, service.ErrNoAvailableCompactAccounts) {
 					h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "compact_not_supported", "No available OpenAI accounts support /responses/compact", streamStarted)
 					return
 				}
 				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Service temporarily unavailable", streamStarted)
 				return
+			}
+			// 候选耗尽 → 先尝试 tier 降级
+			if newKey, ok := h.tryOpenAITierSwap(c, tierState, streamStarted); ok {
+				currentAPIKey = newKey
+				currentSubscription = tierState.currentSub
+				channelMapping, _ = h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), currentAPIKey.GroupID, reqModel)
+				failedAccountIDs = make(map[int64]struct{})
+				switchCount = 0
+				continue
 			}
 			if lastFailoverErr != nil {
 				h.handleFailoverExhausted(c, lastFailoverErr, streamStarted)
@@ -300,7 +552,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		reqLog.Debug("openai.account_selected", zap.Int64("account_id", account.ID), zap.String("account_name", account.Name))
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
-		accountReleaseFunc, acquired := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, reqStream, &streamStarted, reqLog)
+		accountReleaseFunc, acquired := h.acquireResponsesAccountSlot(c, currentAPIKey.GroupID, sessionHash, selection, reqStream, &streamStarted, reqLog)
 		if !acquired {
 			return
 		}
@@ -354,6 +606,14 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				failedAccountIDs[account.ID] = struct{}{}
 				lastFailoverErr = failoverErr
 				if switchCount >= maxAccountSwitches {
+					if newKey, ok := h.tryOpenAITierSwap(c, tierState, streamStarted); ok {
+						currentAPIKey = newKey
+						currentSubscription = tierState.currentSub
+						channelMapping, _ = h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), currentAPIKey.GroupID, reqModel)
+						failedAccountIDs = make(map[int64]struct{})
+						switchCount = 0
+						continue
+					}
 					h.handleFailoverExhausted(c, failoverErr, streamStarted)
 					return
 				}
@@ -389,19 +649,23 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, true, nil)
 		}
 
+		h.persistOpenAITierStickyOnSuccess(c, tierState, tierStickyScope, reqLog, "openai")
+
 		// 捕获请求信息（用于异步记录，避免在 goroutine 中访问 gin.Context）
 		userAgent := c.GetHeader("User-Agent")
 		clientIP := ip.GetClientIP(c)
 		requestPayloadHash := service.HashUsageRequestPayload(body)
+		capturedAPIKey := currentAPIKey
+		capturedSub := currentSubscription
 
 		// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
 		h.submitUsageRecordTask(func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
 				Result:             result,
-				APIKey:             apiKey,
-				User:               apiKey.User,
+				APIKey:             capturedAPIKey,
+				User:               capturedAPIKey.User,
 				Account:            account,
-				Subscription:       subscription,
+				Subscription:       capturedSub,
 				InboundEndpoint:    GetInboundEndpoint(c),
 				UpstreamEndpoint:   GetUpstreamEndpoint(c, account.Platform),
 				UserAgent:          userAgent,
@@ -413,8 +677,8 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				logger.L().With(
 					zap.String("component", "handler.openai_gateway.responses"),
 					zap.Int64("user_id", subject.UserID),
-					zap.Int64("api_key_id", apiKey.ID),
-					zap.Any("group_id", apiKey.GroupID),
+					zap.Int64("api_key_id", capturedAPIKey.ID),
+					zap.Any("group_id", capturedAPIKey.GroupID),
 					zap.String("model", reqModel),
 					zap.Int64("account_id", account.ID),
 				).Error("openai.record_usage_failed", zap.Error(err))
@@ -582,6 +846,10 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 
 	// 解析渠道级模型映射
 	channelMappingMsg, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, reqModel)
+	// Freeze the sticky scope from the ingress primary group + requested model.
+	// Later tier swaps may recompute channel mapping for request rewriting and usage,
+	// but must keep this original sticky key stable across the whole fallback chain.
+	tierStickyScope := resolveTierStickyScope(reqModel, channelMappingMsg)
 
 	// 绑定错误透传服务，允许 service 层在非 failover 错误场景复用规则。
 	if h.errorPassthroughService != nil {
@@ -589,6 +857,19 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	}
 
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
+	currentSubscription := subscription
+
+	// 尝试从 Redis 粘性恢复到上次激活的 tier group；必须在 billing check 之前，
+	// 以便 CheckBillingEligibility 使用已恢复的 tier group 而非主分组。
+	effectiveMappedModel := preferredMappedModel
+	currentAPIKey := apiKey
+	msgTierState := &openAITierSwapState{originalAPIKey: apiKey}
+	if restored, ok := h.restoreOpenAITierFromSticky(c, apiKey, tierStickyScope, msgTierState, reqLog); ok {
+		currentAPIKey = restored
+		currentSubscription = msgTierState.currentSub
+		channelMappingMsg, _ = h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), currentAPIKey.GroupID, reqModel)
+		effectiveMappedModel = resolveOpenAIMessagesDispatchMappedModel(currentAPIKey, reqModel)
+	}
 
 	service.SetOpsLatencyMs(c, service.OpsAuthLatencyMsKey, time.Since(requestStart).Milliseconds())
 	routingStart := time.Now()
@@ -601,7 +882,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		defer userReleaseFunc()
 	}
 
-	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription); err != nil {
+	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), currentAPIKey.User, currentAPIKey, currentAPIKey.Group, currentSubscription); err != nil {
 		reqLog.Info("openai_messages.billing_eligibility_check_failed", zap.Error(err))
 		status, code, message, retryAfter := billingErrorDetails(err)
 		if retryAfter > 0 {
@@ -634,7 +915,6 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	failedAccountIDs := make(map[int64]struct{})
 	sameAccountRetryCount := make(map[int64]int)
 	var lastFailoverErr *service.UpstreamFailoverError
-	effectiveMappedModel := preferredMappedModel
 
 	for {
 		currentRoutingModel := routingModel
@@ -644,7 +924,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		reqLog.Debug("openai_messages.account_selecting", zap.Int("excluded_account_count", len(failedAccountIDs)))
 		selection, scheduleDecision, err := h.gatewayService.SelectAccountWithScheduler(
 			c.Request.Context(),
-			apiKey.GroupID,
+			currentAPIKey.GroupID,
 			"", // no previous_response_id
 			sessionHash,
 			currentRoutingModel,
@@ -659,10 +939,28 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			)
 			if len(failedAccountIDs) == 0 {
 				if err != nil {
+					if newKey, ok := h.tryOpenAITierSwap(c, msgTierState, streamStarted); ok {
+						currentAPIKey = newKey
+						currentSubscription = msgTierState.currentSub
+						channelMappingMsg, _ = h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), currentAPIKey.GroupID, reqModel)
+						effectiveMappedModel = resolveOpenAIMessagesDispatchMappedModel(currentAPIKey, reqModel)
+						failedAccountIDs = make(map[int64]struct{})
+						switchCount = 0
+						continue
+					}
 					h.anthropicStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Service temporarily unavailable", streamStarted)
 					return
 				}
 			} else {
+				if newKey, ok := h.tryOpenAITierSwap(c, msgTierState, streamStarted); ok {
+					currentAPIKey = newKey
+					currentSubscription = msgTierState.currentSub
+					channelMappingMsg, _ = h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), currentAPIKey.GroupID, reqModel)
+					effectiveMappedModel = resolveOpenAIMessagesDispatchMappedModel(currentAPIKey, reqModel)
+					failedAccountIDs = make(map[int64]struct{})
+					switchCount = 0
+					continue
+				}
 				if lastFailoverErr != nil {
 					h.handleAnthropicFailoverExhausted(c, lastFailoverErr, streamStarted)
 				} else {
@@ -681,7 +979,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		_ = scheduleDecision
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
-		accountReleaseFunc, acquired := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, reqStream, &streamStarted, reqLog)
+		accountReleaseFunc, acquired := h.acquireResponsesAccountSlot(c, currentAPIKey.GroupID, sessionHash, selection, reqStream, &streamStarted, reqLog)
 		if !acquired {
 			return
 		}
@@ -737,6 +1035,15 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 				failedAccountIDs[account.ID] = struct{}{}
 				lastFailoverErr = failoverErr
 				if switchCount >= maxAccountSwitches {
+					if newKey, ok := h.tryOpenAITierSwap(c, msgTierState, streamStarted); ok {
+						currentAPIKey = newKey
+						currentSubscription = msgTierState.currentSub
+						channelMappingMsg, _ = h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), currentAPIKey.GroupID, reqModel)
+						effectiveMappedModel = resolveOpenAIMessagesDispatchMappedModel(currentAPIKey, reqModel)
+						failedAccountIDs = make(map[int64]struct{})
+						switchCount = 0
+						continue
+					}
 					h.handleAnthropicFailoverExhausted(c, failoverErr, streamStarted)
 					return
 				}
@@ -764,17 +1071,21 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, true, nil)
 		}
 
+		h.persistOpenAITierStickyOnSuccess(c, msgTierState, tierStickyScope, reqLog, "openai_messages")
+
 		userAgent := c.GetHeader("User-Agent")
 		clientIP := ip.GetClientIP(c)
 		requestPayloadHash := service.HashUsageRequestPayload(body)
+		capturedAPIKey := currentAPIKey
+		capturedSub := currentSubscription
 
 		h.submitUsageRecordTask(func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
 				Result:             result,
-				APIKey:             apiKey,
-				User:               apiKey.User,
+				APIKey:             capturedAPIKey,
+				User:               capturedAPIKey.User,
 				Account:            account,
-				Subscription:       subscription,
+				Subscription:       capturedSub,
 				InboundEndpoint:    GetInboundEndpoint(c),
 				UpstreamEndpoint:   GetUpstreamEndpoint(c, account.Platform),
 				UserAgent:          userAgent,
@@ -786,8 +1097,8 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 				logger.L().With(
 					zap.String("component", "handler.openai_gateway.messages"),
 					zap.Int64("user_id", subject.UserID),
-					zap.Int64("api_key_id", apiKey.ID),
-					zap.Any("group_id", apiKey.GroupID),
+					zap.Int64("api_key_id", capturedAPIKey.ID),
+					zap.Any("group_id", capturedAPIKey.GroupID),
 					zap.String("model", reqModel),
 					zap.Int64("account_id", account.ID),
 				).Error("openai_messages.record_usage_failed", zap.Error(err))
@@ -1123,9 +1434,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	)
 	setOpsRequestContext(c, reqModel, true, firstMessage)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeWSV2))
-
-	// 解析渠道级模型映射
-	channelMappingWS, _ := h.gatewayService.ResolveChannelMappingAndRestrict(ctx, apiKey.GroupID, reqModel)
+	channelMappingWS, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, reqModel)
+	// Freeze the sticky scope from the ingress primary group + requested model.
+	// Later tier swaps may recompute channel mapping for request rewriting and usage,
+	// but must keep this original sticky key stable across the whole fallback chain.
+	tierStickyScope := resolveTierStickyScope(reqModel, channelMappingWS)
 
 	var currentUserRelease func()
 	var currentAccountRelease func()
@@ -1155,29 +1468,26 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	currentUserRelease = wrapReleaseOnDone(ctx, userReleaseFunc)
 
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
-	if err := h.billingCacheService.CheckBillingEligibility(ctx, apiKey.User, apiKey, apiKey.Group, subscription); err != nil {
-		reqLog.Info("openai.websocket_billing_eligibility_check_failed", zap.Error(err))
+	currentAPIKey, currentSubscription, channelMappingWS, wsTierState, sessionHash, selection, scheduleDecision, billingErr, err := h.selectOpenAIWSInitialRoute(
+		c,
+		apiKey,
+		subscription,
+		reqModel,
+		previousResponseID,
+		firstMessage,
+		reqLog,
+	)
+	if billingErr != nil {
+		reqLog.Info("openai.websocket_billing_eligibility_check_failed", zap.Error(billingErr))
 		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "billing check failed")
 		return
 	}
-
-	sessionHash := h.gatewayService.GenerateSessionHashWithFallback(
-		c,
-		firstMessage,
-		openAIWSIngressFallbackSessionSeed(subject.UserID, apiKey.ID, apiKey.GroupID),
-	)
-	selection, scheduleDecision, err := h.gatewayService.SelectAccountWithScheduler(
-		ctx,
-		apiKey.GroupID,
-		previousResponseID,
-		sessionHash,
-		reqModel,
-		nil,
-		service.OpenAIUpstreamTransportResponsesWebsocketV2,
-		false,
-	)
 	if err != nil {
 		reqLog.Warn("openai.websocket_account_select_failed", zap.Error(err))
+		if errors.Is(err, service.ErrNoAvailableCompactAccounts) {
+			closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "no available account supports responses websocket v2")
+			return
+		}
 		closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "no available account")
 		return
 	}
@@ -1214,7 +1524,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		accountReleaseFunc = fastReleaseFunc
 	}
 	currentAccountRelease = wrapReleaseOnDone(ctx, accountReleaseFunc)
-	if err := h.gatewayService.BindStickySession(ctx, apiKey.GroupID, sessionHash, account.ID); err != nil {
+	if err := h.gatewayService.BindStickySession(ctx, currentAPIKey.GroupID, sessionHash, account.ID); err != nil {
 		reqLog.Warn("openai.websocket_bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 	}
 
@@ -1273,13 +1583,14 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				h.gatewayService.UpdateCodexUsageSnapshotFromHeaders(ctx, account.ID, result.ResponseHeaders)
 			}
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, true, result.FirstTokenMs)
+			h.persistOpenAITierStickyOnSuccess(c, wsTierState, tierStickyScope, reqLog, "openai.websocket")
 			h.submitUsageRecordTask(func(taskCtx context.Context) {
 				if err := h.gatewayService.RecordUsage(taskCtx, &service.OpenAIRecordUsageInput{
 					Result:             result,
-					APIKey:             apiKey,
-					User:               apiKey.User,
+					APIKey:             currentAPIKey,
+					User:               currentAPIKey.User,
 					Account:            account,
-					Subscription:       subscription,
+					Subscription:       currentSubscription,
 					InboundEndpoint:    GetInboundEndpoint(c),
 					UpstreamEndpoint:   GetUpstreamEndpoint(c, account.Platform),
 					UserAgent:          userAgent,

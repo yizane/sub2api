@@ -631,6 +631,11 @@ type GatewayConfig struct {
 	// 空闲超过此时间的会话将被自动释放
 	SessionIdleTimeoutMinutes int `mapstructure:"session_idle_timeout_minutes"`
 
+	// TierStickyTTLMinutes: API Key 多级降级链的粘性窗口（分钟），默认 5 分钟。
+	// 进入降级 tier 后，后续请求在该窗口内直接命中已激活 tier，避免反复重走主分组失败链路。
+	// 0 = 使用默认值（5 分钟）；负数 = 禁用粘性（每个请求都从主分组起跳）。
+	TierStickyTTLMinutes int `mapstructure:"tier_sticky_ttl_minutes"`
+
 	// StreamDataIntervalTimeout: 流数据间隔超时（秒），0表示禁用
 	StreamDataIntervalTimeout int `mapstructure:"stream_data_interval_timeout"`
 	// StreamKeepaliveInterval: 流式 keepalive 间隔（秒），0表示禁用

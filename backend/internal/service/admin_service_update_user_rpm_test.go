@@ -6,6 +6,7 @@ import (
 	"context"
 	"testing"
 
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/stretchr/testify/require"
 )
 
@@ -66,4 +67,47 @@ func TestAdminService_UpdateUser_NoInvalidateWhenRPMLimitUnchanged(t *testing.T)
 	})
 	require.NoError(t, err)
 	require.Empty(t, invalidator.userIDs, "只改 username 不应触发认证缓存失效")
+}
+
+func TestAdminService_UpdateUser_InvalidatesAuthCacheOnAllowedGroupsChange(t *testing.T) {
+	base := &userRepoStub{user: &User{
+		ID:            42,
+		Email:         "u@example.com",
+		AllowedGroups: []int64{3, 5},
+	}}
+	repo := &rpmUserRepoStub{userRepoStub: base}
+	invalidator := &authCacheInvalidatorStub{}
+	svc := &adminServiceImpl{
+		userRepo:             repo,
+		redeemCodeRepo:       &redeemRepoStub{},
+		authCacheInvalidator: invalidator,
+	}
+
+	allowedGroups := []int64{3, 7}
+	updated, err := svc.UpdateUser(context.Background(), 42, &UpdateUserInput{
+		AllowedGroups: &allowedGroups,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, updated)
+	require.Equal(t, []int64{3, 7}, updated.AllowedGroups)
+	require.Equal(t, []int64{42}, invalidator.userIDs, "allowed_groups 变更也应失效 API Key 认证缓存")
+}
+
+func TestAdminService_UpdateUser_InvalidTierDefaultsReturnBadRequest(t *testing.T) {
+	base := &userRepoStub{user: &User{ID: 42, Email: "u@example.com"}}
+	repo := &rpmUserRepoStub{userRepoStub: base}
+	svc := &adminServiceImpl{
+		userRepo:       repo,
+		redeemCodeRepo: &redeemRepoStub{},
+		groupRepo:      &tierFallbackGroupRepoStub{},
+	}
+
+	tierIDs := []int64{999}
+	updated, err := svc.UpdateUser(context.Background(), 42, &UpdateUserInput{
+		DefaultTierGroupIDs: &tierIDs,
+	})
+	require.Error(t, err)
+	require.Nil(t, updated)
+	require.Equal(t, 400, infraerrors.Code(err))
+	require.Contains(t, err.Error(), "INVALID_TIER_GROUP")
 }

@@ -10,6 +10,7 @@ import (
 
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
+	"entgo.io/ent/dialect/sql/sqljson"
 	"entgo.io/ent/schema/field"
 	"github.com/Wei-Shaw/sub2api/ent/announcementread"
 	"github.com/Wei-Shaw/sub2api/ent/apikey"
@@ -407,6 +408,24 @@ func (_u *UserUpdate) SetNillableRpmLimit(v *int) *UserUpdate {
 // AddRpmLimit adds value to the "rpm_limit" field.
 func (_u *UserUpdate) AddRpmLimit(v int) *UserUpdate {
 	_u.mutation.AddRpmLimit(v)
+	return _u
+}
+
+// SetDefaultTierGroupIds sets the "default_tier_group_ids" field.
+func (_u *UserUpdate) SetDefaultTierGroupIds(v []int64) *UserUpdate {
+	_u.mutation.SetDefaultTierGroupIds(v)
+	return _u
+}
+
+// AppendDefaultTierGroupIds appends value to the "default_tier_group_ids" field.
+func (_u *UserUpdate) AppendDefaultTierGroupIds(v []int64) *UserUpdate {
+	_u.mutation.AppendDefaultTierGroupIds(v)
+	return _u
+}
+
+// ClearDefaultTierGroupIds clears the value of the "default_tier_group_ids" field.
+func (_u *UserUpdate) ClearDefaultTierGroupIds() *UserUpdate {
+	_u.mutation.ClearDefaultTierGroupIds()
 	return _u
 }
 
@@ -1034,6 +1053,17 @@ func (_u *UserUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.AddedRpmLimit(); ok {
 		_spec.AddField(user.FieldRpmLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.DefaultTierGroupIds(); ok {
+		_spec.SetField(user.FieldDefaultTierGroupIds, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedDefaultTierGroupIds(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, user.FieldDefaultTierGroupIds, value)
+		})
+	}
+	if _u.mutation.DefaultTierGroupIdsCleared() {
+		_spec.ClearField(user.FieldDefaultTierGroupIds, field.TypeJSON)
 	}
 	if _u.mutation.APIKeysCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -1978,6 +2008,24 @@ func (_u *UserUpdateOne) AddRpmLimit(v int) *UserUpdateOne {
 	return _u
 }
 
+// SetDefaultTierGroupIds sets the "default_tier_group_ids" field.
+func (_u *UserUpdateOne) SetDefaultTierGroupIds(v []int64) *UserUpdateOne {
+	_u.mutation.SetDefaultTierGroupIds(v)
+	return _u
+}
+
+// AppendDefaultTierGroupIds appends value to the "default_tier_group_ids" field.
+func (_u *UserUpdateOne) AppendDefaultTierGroupIds(v []int64) *UserUpdateOne {
+	_u.mutation.AppendDefaultTierGroupIds(v)
+	return _u
+}
+
+// ClearDefaultTierGroupIds clears the value of the "default_tier_group_ids" field.
+func (_u *UserUpdateOne) ClearDefaultTierGroupIds() *UserUpdateOne {
+	_u.mutation.ClearDefaultTierGroupIds()
+	return _u
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_u *UserUpdateOne) AddAPIKeyIDs(ids ...int64) *UserUpdateOne {
 	_u.mutation.AddAPIKeyIDs(ids...)
@@ -2632,6 +2680,17 @@ func (_u *UserUpdateOne) sqlSave(ctx context.Context) (_node *User, err error) {
 	}
 	if value, ok := _u.mutation.AddedRpmLimit(); ok {
 		_spec.AddField(user.FieldRpmLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.DefaultTierGroupIds(); ok {
+		_spec.SetField(user.FieldDefaultTierGroupIds, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedDefaultTierGroupIds(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, user.FieldDefaultTierGroupIds, value)
+		})
+	}
+	if _u.mutation.DefaultTierGroupIdsCleared() {
+		_spec.ClearField(user.FieldDefaultTierGroupIds, field.TypeJSON)
 	}
 	if _u.mutation.APIKeysCleared() {
 		edge := &sqlgraph.EdgeSpec{

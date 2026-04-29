@@ -163,6 +163,10 @@ type CreateAPIKeyRequest struct {
 	RateLimit5h float64 `json:"rate_limit_5h"`
 	RateLimit1d float64 `json:"rate_limit_1d"`
 	RateLimit7d float64 `json:"rate_limit_7d"`
+
+	// Tier 降级链路
+	TierGroupIDs []int64 `json:"tier_group_ids"` // 有序降级 group ID 列表（空 = 走兜底）
+	MaxTierDepth int     `json:"max_tier_depth"` // 链路最大深度，0 = 不限制
 }
 
 // UpdateAPIKeyRequest 更新API Key请求
@@ -184,6 +188,10 @@ type UpdateAPIKeyRequest struct {
 	RateLimit1d         *float64 `json:"rate_limit_1d"`
 	RateLimit7d         *float64 `json:"rate_limit_7d"`
 	ResetRateLimitUsage *bool    `json:"reset_rate_limit_usage"` // Reset all usage counters to 0
+
+	// Tier 降级链路（nil = no change，[] 空数组 = 显式清空）
+	TierGroupIDs *[]int64 `json:"tier_group_ids"`
+	MaxTierDepth *int     `json:"max_tier_depth"`
 }
 
 // APIKeyService API Key服务
@@ -325,6 +333,62 @@ func (s *APIKeyService) canUserBindGroup(ctx context.Context, user *User, group 
 	return user.CanBindGroup(group.ID, group.IsExclusive)
 }
 
+// validateTierGroupIDs 校验 tier 链路：每个 group 必须存在、active、用户被允许；
+// 不允许重复（去重保留顺序）；不允许等于 primaryGroupID。返回标准化后的列表。
+// 空列表（[]）合法，表示清除链路。
+func (s *APIKeyService) validateTierGroupIDs(ctx context.Context, user *User, ids []int64, primaryGroupID *int64) ([]int64, error) {
+	if len(ids) == 0 {
+		return []int64{}, nil
+	}
+	const maxLen = 16
+	if len(ids) > maxLen {
+		return nil, fmt.Errorf("tier_group_ids exceeds max length %d", maxLen)
+	}
+	if primaryGroupID == nil || *primaryGroupID <= 0 {
+		return nil, fmt.Errorf("tier_group_ids requires a primary group")
+	}
+	primaryGroup, err := s.groupRepo.GetByID(ctx, *primaryGroupID)
+	if err != nil {
+		return nil, fmt.Errorf("primary group %d: %w", *primaryGroupID, err)
+	}
+	if !primaryGroup.IsOpenAI() {
+		return nil, fmt.Errorf("tier_group_ids requires an OpenAI primary group")
+	}
+	primaryPlatform := strings.TrimSpace(primaryGroup.Platform)
+	seen := make(map[int64]struct{}, len(ids))
+	out := make([]int64, 0, len(ids))
+	for _, id := range ids {
+		if id <= 0 {
+			return nil, fmt.Errorf("invalid group id: %d", id)
+		}
+		if id == *primaryGroupID {
+			return nil, fmt.Errorf("tier_group_ids cannot include primary group %d", id)
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		group, err := s.groupRepo.GetByID(ctx, id)
+		if err != nil {
+			return nil, fmt.Errorf("tier group %d: %w", id, err)
+		}
+		if group.Status != StatusActive {
+			return nil, fmt.Errorf("tier group %d is not active", id)
+		}
+		if !group.IsOpenAI() {
+			return nil, fmt.Errorf("tier group %d must be an OpenAI group", id)
+		}
+		if primaryPlatform != "" && strings.TrimSpace(group.Platform) != primaryPlatform {
+			return nil, fmt.Errorf("tier group %d platform %q does not match primary platform %q", id, group.Platform, primaryPlatform)
+		}
+		if user != nil && !s.canUserBindGroup(ctx, user, group) {
+			return nil, fmt.Errorf("user not allowed to use group %d", id)
+		}
+		out = append(out, id)
+	}
+	return out, nil
+}
+
 // Create 创建API Key
 func (s *APIKeyService) Create(ctx context.Context, userID int64, req CreateAPIKeyRequest) (*APIKey, error) {
 	// 验证用户存在
@@ -395,20 +459,31 @@ func (s *APIKeyService) Create(ctx context.Context, userID int64, req CreateAPIK
 		}
 	}
 
+	// 校验 tier 链路
+	tierGroupIDs, err := s.validateTierGroupIDs(ctx, user, req.TierGroupIDs, req.GroupID)
+	if err != nil {
+		return nil, err
+	}
+	if req.MaxTierDepth < 0 {
+		return nil, fmt.Errorf("max_tier_depth must be >= 0")
+	}
+
 	// 创建API Key记录
 	apiKey := &APIKey{
-		UserID:      userID,
-		Key:         key,
-		Name:        req.Name,
-		GroupID:     req.GroupID,
-		Status:      StatusActive,
-		IPWhitelist: req.IPWhitelist,
-		IPBlacklist: req.IPBlacklist,
-		Quota:       req.Quota,
-		QuotaUsed:   0,
-		RateLimit5h: req.RateLimit5h,
-		RateLimit1d: req.RateLimit1d,
-		RateLimit7d: req.RateLimit7d,
+		UserID:       userID,
+		Key:          key,
+		Name:         req.Name,
+		GroupID:      req.GroupID,
+		Status:       StatusActive,
+		IPWhitelist:  req.IPWhitelist,
+		IPBlacklist:  req.IPBlacklist,
+		Quota:        req.Quota,
+		QuotaUsed:    0,
+		RateLimit5h:  req.RateLimit5h,
+		RateLimit1d:  req.RateLimit1d,
+		RateLimit7d:  req.RateLimit7d,
+		TierGroupIDs: tierGroupIDs,
+		MaxTierDepth: req.MaxTierDepth,
 	}
 
 	// Set expiration time if specified
@@ -541,12 +616,15 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 		apiKey.Name = *req.Name
 	}
 
+	groupChanged := false
+	var currentUser *User
 	if req.GroupID != nil {
 		// 验证分组权限
 		user, err := s.userRepo.GetByID(ctx, userID)
 		if err != nil {
 			return nil, fmt.Errorf("get user: %w", err)
 		}
+		currentUser = user
 
 		group, err := s.groupRepo.GetByID(ctx, *req.GroupID)
 		if err != nil {
@@ -557,6 +635,7 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 			return nil, ErrGroupNotAllowed
 		}
 
+		groupChanged = apiKey.GroupID == nil || *apiKey.GroupID != *req.GroupID
 		apiKey.GroupID = req.GroupID
 	}
 
@@ -619,6 +698,40 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 		apiKey.Window5hStart = nil
 		apiKey.Window1dStart = nil
 		apiKey.Window7dStart = nil
+	}
+
+	// Update tier 降级链路
+	if req.TierGroupIDs != nil {
+		if currentUser == nil {
+			currentUser, err = s.userRepo.GetByID(ctx, userID)
+			if err != nil {
+				return nil, fmt.Errorf("get user: %w", err)
+			}
+		}
+		validated, err := s.validateTierGroupIDs(ctx, currentUser, *req.TierGroupIDs, apiKey.GroupID)
+		if err != nil {
+			return nil, err
+		}
+		apiKey.TierGroupIDs = validated
+	} else if groupChanged && len(apiKey.TierGroupIDs) > 0 {
+		if currentUser == nil {
+			currentUser, err = s.userRepo.GetByID(ctx, userID)
+			if err != nil {
+				return nil, fmt.Errorf("get user: %w", err)
+			}
+		}
+		validated, err := s.validateTierGroupIDs(ctx, currentUser, apiKey.TierGroupIDs, apiKey.GroupID)
+		if err != nil {
+			return nil, fmt.Errorf("existing tier_group_ids are invalid for the new primary group: %w", err)
+		} else {
+			apiKey.TierGroupIDs = validated
+		}
+	}
+	if req.MaxTierDepth != nil {
+		if *req.MaxTierDepth < 0 {
+			return nil, fmt.Errorf("max_tier_depth must be >= 0")
+		}
+		apiKey.MaxTierDepth = *req.MaxTierDepth
 	}
 
 	if err := s.apiKeyRepo.Update(ctx, apiKey); err != nil {

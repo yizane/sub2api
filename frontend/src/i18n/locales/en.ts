@@ -769,6 +769,14 @@ export default {
     currentExpiration: 'Current expiration',
     expiresAt: 'Expires',
     noExpiration: 'Never',
+    tierFallbackChain: 'Tier Fallback Chain',
+    selectTierGroup: 'Select fallback group',
+    addTierGroup: 'Add fallback group',
+    tierFallbackHint: 'Only activated when all accounts in the primary group are exhausted.',
+    tierFallbackRequiresPrimaryGroup: 'Select a primary group first to configure tier fallback.',
+    tierFallbackOpenAIOnly: 'Tier fallback is only available for OpenAI primary groups.',
+    maxTierDepth: 'Max depth',
+    maxTierDepthHint: '0 = unlimited',
     status: {
       active: 'Active',
       inactive: 'Inactive',
@@ -1669,7 +1677,9 @@ export default {
       form: {
         rpmLimit: 'Requests Per Minute (RPM)',
         rpmLimitPlaceholder: '0 = unlimited',
-        rpmLimitHint: 'Max requests per minute for this user; 0 = unlimited. Acts as a fallback only when the group has no rpm_limit set.'
+        rpmLimitHint: 'Max requests per minute for this user; 0 = unlimited. Acts as a fallback only when the group has no rpm_limit set.',
+        defaultTierGroupIds: 'Default Tier Fallback Chain',
+        defaultTierGroupIdsHint: 'User-level default tier chain. Used when per-key chain is not configured.'
       },
       columns: {
         user: 'User',
@@ -2037,6 +2047,11 @@ export default {
       invalidRequestFallback: {
         title: 'Invalid Request Fallback Group',
         hint: 'Triggered only when upstream explicitly returns prompt too long. Leave empty to disable fallback.',
+        noFallback: 'No Fallback'
+      },
+      tierFallback: {
+        title: 'Tier Fallback Group',
+        hint: 'Independent of CCO fallback. Triggered only when this group\'s accounts are exhausted by the tier failover chain.',
         noFallback: 'No Fallback'
       },
       copyAccounts: {
@@ -5456,6 +5471,14 @@ export default {
           testSuccess: 'Google Drive storage test passed (upload, access, delete all OK)',
           testFailed: 'Google Drive storage test failed'
         }
+      },
+      defaultTierGroupIds: {
+        title: 'System Default Tier Fallback Chain',
+        description: 'Global default fallback group chain applied when a key has no per-key or per-user chain configured.',
+        hint: 'Drag to reorder. Applied only after all accounts in the current group are exhausted.',
+        loadFailed: 'Failed to load system default tier chain. Saving is disabled until the latest value is loaded.',
+        saved: 'System default tier chain saved',
+        saveFailed: 'Failed to save system default tier chain'
       },
       overloadCooldown: {
         title: '529 Overload Cooldown',

@@ -100,6 +100,14 @@ func (Group) Fields() []ent.Field {
 			Nillable().
 			Comment("无效请求兜底使用的分组 ID"),
 
+		// Tier 链路单指针（基础设施级降级链兜底）
+		// 独立于 fallback_group_id（CCO 触发）和 fallback_group_id_on_invalid_request（无效请求触发）
+		// 仅在 api_key/user/系统设置的 tier 列表都为空时使用此字段递归构建链路
+		field.Int64("tier_fallback_group_id").
+			Optional().
+			Nillable().
+			Comment("Tier 降级链单指针；与 fallback_group_id (CCO) 和 fallback_group_id_on_invalid_request 语义独立"),
+
 		// 模型路由配置 (added by migration 040)
 		field.JSON("model_routing", map[string][]int64{}).
 			Optional().

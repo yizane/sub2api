@@ -72,3 +72,46 @@ func TestAPIKeyRepository_GetByKeyForAuth_PreservesMessagesDispatchModelConfig_S
 	require.NotNil(t, got.Group)
 	require.Equal(t, group.MessagesDispatchModelConfig, got.Group.MessagesDispatchModelConfig)
 }
+
+func TestAPIKeyRepository_GetByKeyForAuth_HydratesAllowedGroups_SQLite(t *testing.T) {
+	repo, client := newAPIKeyRepoSQLite(t)
+	ctx := context.Background()
+	user := mustCreateAPIKeyRepoUser(t, ctx, client, "getbykey-auth-allowed-groups-unit@test.com")
+
+	groupA, err := client.Group.Create().
+		SetName("exclusive-a").
+		SetPlatform(service.PlatformAnthropic).
+		SetStatus(service.StatusActive).
+		SetSubscriptionType(service.SubscriptionTypeStandard).
+		SetRateMultiplier(1).
+		SetIsExclusive(true).
+		Save(ctx)
+	require.NoError(t, err)
+
+	groupB, err := client.Group.Create().
+		SetName("exclusive-b").
+		SetPlatform(service.PlatformAnthropic).
+		SetStatus(service.StatusActive).
+		SetSubscriptionType(service.SubscriptionTypeStandard).
+		SetRateMultiplier(1).
+		SetIsExclusive(true).
+		Save(ctx)
+	require.NoError(t, err)
+
+	require.NoError(t, client.UserAllowedGroup.Create().SetUserID(user.ID).SetGroupID(groupA.ID).Exec(ctx))
+	require.NoError(t, client.UserAllowedGroup.Create().SetUserID(user.ID).SetGroupID(groupB.ID).Exec(ctx))
+
+	key := &service.APIKey{
+		UserID:  user.ID,
+		Key:     "sk-getbykey-auth-allowed-groups-unit",
+		Name:    "Allowed Groups Key Unit",
+		GroupID: &groupA.ID,
+		Status:  service.StatusActive,
+	}
+	require.NoError(t, repo.Create(ctx, key))
+
+	got, err := repo.GetByKeyForAuth(ctx, key.Key)
+	require.NoError(t, err)
+	require.NotNil(t, got.User)
+	require.Equal(t, []int64{groupA.ID, groupB.ID}, got.User.AllowedGroups)
+}

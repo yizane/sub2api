@@ -14,6 +14,8 @@ const {
   getStreamTimeoutSettings,
   getRectifierSettings,
   getBetaPolicySettings,
+  getDefaultTierGroupIds,
+  updateDefaultTierGroupIds,
   getGroups,
   listProxies,
   getProviders,
@@ -34,6 +36,8 @@ const {
   getStreamTimeoutSettings: vi.fn(),
   getRectifierSettings: vi.fn(),
   getBetaPolicySettings: vi.fn(),
+  getDefaultTierGroupIds: vi.fn(),
+  updateDefaultTierGroupIds: vi.fn(),
   getGroups: vi.fn(),
   listProxies: vi.fn(),
   getProviders: vi.fn(),
@@ -60,6 +64,8 @@ vi.mock("@/api", () => ({
       getStreamTimeoutSettings,
       getRectifierSettings,
       getBetaPolicySettings,
+      getDefaultTierGroupIds,
+      updateDefaultTierGroupIds,
     },
     groups: {
       getAll: getGroups,
@@ -394,7 +400,7 @@ const baseSettingsResponse = {
   account_quota_notify_emails: [],
 };
 
-function mountView() {
+function mountView(extraStubs: Record<string, unknown> = {}) {
   return mount(SettingsView, {
     global: {
       stubs: {
@@ -410,6 +416,7 @@ function mountView() {
         ProxySelector: true,
         ImageUpload: ImageUploadStub,
         BackupSettings: true,
+        ...extraStubs,
       },
     },
   });
@@ -445,6 +452,16 @@ async function openUsersTab(wrapper: ReturnType<typeof mountView>) {
   await flushPromises();
 }
 
+async function openGatewayTab(wrapper: ReturnType<typeof mountView>) {
+  const gatewayTabButton = wrapper
+    .findAll("button")
+    .find((node) => node.text().includes("admin.settings.tabs.gateway"));
+
+  expect(gatewayTabButton).toBeDefined();
+  await gatewayTabButton?.trigger("click");
+  await flushPromises();
+}
+
 describe("admin SettingsView payment visible method controls", () => {
   beforeEach(() => {
     getSettings.mockReset();
@@ -456,6 +473,8 @@ describe("admin SettingsView payment visible method controls", () => {
     getStreamTimeoutSettings.mockReset();
     getRectifierSettings.mockReset();
     getBetaPolicySettings.mockReset();
+    getDefaultTierGroupIds.mockReset();
+    updateDefaultTierGroupIds.mockReset();
     getGroups.mockReset();
     listProxies.mockReset();
     getProviders.mockReset();
@@ -505,6 +524,12 @@ describe("admin SettingsView payment visible method controls", () => {
     });
     getBetaPolicySettings.mockResolvedValue({
       rules: [],
+    });
+    getDefaultTierGroupIds.mockResolvedValue({
+      ids: [],
+    });
+    updateDefaultTierGroupIds.mockResolvedValue({
+      ids: [],
     });
     getGroups.mockResolvedValue([]);
     listProxies.mockResolvedValue({
@@ -659,6 +684,158 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(paymentHelpImageUpload?.attributes("data-upload-label")).toBe("上传图片");
     expect(paymentHelpImageUpload?.attributes("data-remove-label")).toBe("移除");
   });
+
+  it("passes only OpenAI groups to the system tier fallback editor", async () => {
+    getGroups.mockResolvedValue([
+      {
+        id: 1,
+        name: "Anthropic Primary",
+        description: null,
+        platform: "anthropic",
+        rate_multiplier: 1,
+        is_exclusive: false,
+        status: "active",
+        subscription_type: "standard",
+        daily_limit_usd: null,
+        weekly_limit_usd: null,
+        monthly_limit_usd: null,
+        image_price_1k: null,
+        image_price_2k: null,
+        image_price_4k: null,
+        claude_code_only: false,
+        fallback_group_id: null,
+        fallback_group_id_on_invalid_request: null,
+        tier_fallback_group_id: null,
+        require_oauth_only: false,
+        require_privacy_set: false,
+        created_at: "",
+        updated_at: "",
+        model_routing: null,
+        model_routing_enabled: false,
+        mcp_xml_inject: false,
+        supported_model_scopes: [],
+      },
+      {
+        id: 2,
+        name: "OpenAI Standard",
+        description: null,
+        platform: "openai",
+        rate_multiplier: 1,
+        is_exclusive: false,
+        status: "active",
+        subscription_type: "standard",
+        daily_limit_usd: null,
+        weekly_limit_usd: null,
+        monthly_limit_usd: null,
+        image_price_1k: null,
+        image_price_2k: null,
+        image_price_4k: null,
+        claude_code_only: false,
+        fallback_group_id: null,
+        fallback_group_id_on_invalid_request: null,
+        tier_fallback_group_id: null,
+        require_oauth_only: false,
+        require_privacy_set: false,
+        created_at: "",
+        updated_at: "",
+        model_routing: null,
+        model_routing_enabled: false,
+        mcp_xml_inject: false,
+        supported_model_scopes: [],
+      },
+      {
+        id: 3,
+        name: "OpenAI Subscription",
+        description: null,
+        platform: "openai",
+        rate_multiplier: 1,
+        is_exclusive: true,
+        status: "active",
+        subscription_type: "subscription",
+        daily_limit_usd: null,
+        weekly_limit_usd: null,
+        monthly_limit_usd: null,
+        image_price_1k: null,
+        image_price_2k: null,
+        image_price_4k: null,
+        claude_code_only: false,
+        fallback_group_id: null,
+        fallback_group_id_on_invalid_request: null,
+        tier_fallback_group_id: null,
+        require_oauth_only: false,
+        require_privacy_set: false,
+        created_at: "",
+        updated_at: "",
+        model_routing: null,
+        model_routing_enabled: false,
+        mcp_xml_inject: false,
+        supported_model_scopes: [],
+      },
+      {
+        id: 4,
+        name: "Inactive OpenAI Group",
+        description: null,
+        platform: "openai",
+        rate_multiplier: 1,
+        is_exclusive: false,
+        status: "disabled",
+        subscription_type: "standard",
+        daily_limit_usd: null,
+        weekly_limit_usd: null,
+        monthly_limit_usd: null,
+        image_price_1k: null,
+        image_price_2k: null,
+        image_price_4k: null,
+        claude_code_only: false,
+        fallback_group_id: null,
+        fallback_group_id_on_invalid_request: null,
+        tier_fallback_group_id: null,
+        require_oauth_only: false,
+        require_privacy_set: false,
+        created_at: "",
+        updated_at: "",
+        model_routing: null,
+        model_routing_enabled: false,
+        mcp_xml_inject: false,
+        supported_model_scopes: [],
+      },
+    ]);
+
+    const TierGroupChainEditorStub = defineComponent({
+      props: {
+        groups: {
+          type: Array,
+          default: () => [],
+        },
+      },
+      setup(props) {
+        return () =>
+          h("div", {
+            class: "tier-group-chain-editor-stub",
+            "data-groups": JSON.stringify(props.groups),
+          });
+      },
+    });
+
+    const wrapper = mountView({
+      TierGroupChainEditor: TierGroupChainEditorStub,
+    });
+
+    await flushPromises();
+    await openGatewayTab(wrapper);
+
+    const passedGroupsList = wrapper
+      .findAll(".tier-group-chain-editor-stub")
+      .map((node) => JSON.parse(node.attributes("data-groups") ?? "[]"));
+    expect(passedGroupsList).toContainEqual([
+      { value: 2, label: "OpenAI Standard" },
+      { value: 3, label: "OpenAI Subscription" },
+    ]);
+    expect(passedGroupsList.flat()).not.toContainEqual({
+      value: 4,
+      label: "Inactive OpenAI Group",
+    });
+  });
 });
 
 describe("admin SettingsView wechat connect controls", () => {
@@ -672,6 +849,8 @@ describe("admin SettingsView wechat connect controls", () => {
     getStreamTimeoutSettings.mockReset();
     getRectifierSettings.mockReset();
     getBetaPolicySettings.mockReset();
+    getDefaultTierGroupIds.mockReset();
+    updateDefaultTierGroupIds.mockReset();
     getGroups.mockReset();
     listProxies.mockReset();
     getProviders.mockReset();
@@ -724,6 +903,12 @@ describe("admin SettingsView wechat connect controls", () => {
     });
     getBetaPolicySettings.mockResolvedValue({
       rules: [],
+    });
+    getDefaultTierGroupIds.mockResolvedValue({
+      ids: [],
+    });
+    updateDefaultTierGroupIds.mockResolvedValue({
+      ids: [],
     });
     getGroups.mockResolvedValue([]);
     listProxies.mockResolvedValue({

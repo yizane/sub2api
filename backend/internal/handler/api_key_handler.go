@@ -42,6 +42,10 @@ type CreateAPIKeyRequest struct {
 	RateLimit5h *float64 `json:"rate_limit_5h"`
 	RateLimit1d *float64 `json:"rate_limit_1d"`
 	RateLimit7d *float64 `json:"rate_limit_7d"`
+
+	// Tier fallback chain (ordered group IDs; 0 = no depth cap)
+	TierGroupIDs []int64 `json:"tier_group_ids"`
+	MaxTierDepth *int    `json:"max_tier_depth"`
 }
 
 // UpdateAPIKeyRequest represents the update API key request payload
@@ -60,6 +64,10 @@ type UpdateAPIKeyRequest struct {
 	RateLimit1d         *float64 `json:"rate_limit_1d"`
 	RateLimit7d         *float64 `json:"rate_limit_7d"`
 	ResetRateLimitUsage *bool    `json:"reset_rate_limit_usage"` // 重置限速用量
+
+	// Tier fallback chain (nil = no change; empty slice = clear chain)
+	TierGroupIDs *[]int64 `json:"tier_group_ids"`
+	MaxTierDepth *int     `json:"max_tier_depth"`
 }
 
 // List handles listing user's API keys with pagination
@@ -160,6 +168,10 @@ func (h *APIKeyHandler) Create(c *gin.Context) {
 		IPWhitelist:   req.IPWhitelist,
 		IPBlacklist:   req.IPBlacklist,
 		ExpiresInDays: req.ExpiresInDays,
+		TierGroupIDs:  req.TierGroupIDs,
+	}
+	if req.MaxTierDepth != nil {
+		svcReq.MaxTierDepth = *req.MaxTierDepth
 	}
 	if req.Quota != nil {
 		svcReq.Quota = *req.Quota
@@ -213,6 +225,8 @@ func (h *APIKeyHandler) Update(c *gin.Context) {
 		RateLimit1d:         req.RateLimit1d,
 		RateLimit7d:         req.RateLimit7d,
 		ResetRateLimitUsage: req.ResetRateLimitUsage,
+		TierGroupIDs:        req.TierGroupIDs,
+		MaxTierDepth:        req.MaxTierDepth,
 	}
 	if req.Name != "" {
 		svcReq.Name = &req.Name

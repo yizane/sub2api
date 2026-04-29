@@ -287,6 +287,18 @@ func (m *mockGatewayCacheForGemini) DeleteSessionAccountID(ctx context.Context, 
 	delete(m.sessionBindings, sessionHash)
 	return nil
 }
+func (m *mockGatewayCacheForGemini) GetTierStickyGroupID(_ context.Context, _ int64, _ string) (int64, error) {
+	return 0, nil
+}
+func (m *mockGatewayCacheForGemini) SetTierStickyGroupID(_ context.Context, _ int64, _ string, _ int64, _ time.Duration) error {
+	return nil
+}
+func (m *mockGatewayCacheForGemini) RefreshTierStickyTTL(_ context.Context, _ int64, _ string, _ time.Duration) error {
+	return nil
+}
+func (m *mockGatewayCacheForGemini) DeleteTierStickyGroupID(_ context.Context, _ int64, _ string) error {
+	return nil
+}
 
 // TestGeminiMessagesCompatService_SelectAccountForModelWithExclusions_GeminiPlatform 测试 Gemini 单平台选择
 func TestGeminiMessagesCompatService_SelectAccountForModelWithExclusions_GeminiPlatform(t *testing.T) {

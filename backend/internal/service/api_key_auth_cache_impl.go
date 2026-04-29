@@ -14,7 +14,9 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 7 // v7: added UserGroupRPMOverride on user snapshot
+// Keep v9: v8 was skipped during development; retaining the newer version avoids
+// accidental cache compatibility with older snapshot shapes.
+const apiKeyAuthSnapshotVersion = 9 // v9: added user.allowed_groups to auth snapshot for exclusive tier ACL checks
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -206,19 +208,21 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 		return nil
 	}
 	snapshot := &APIKeyAuthSnapshot{
-		Version:     apiKeyAuthSnapshotVersion,
-		APIKeyID:    apiKey.ID,
-		UserID:      apiKey.UserID,
-		GroupID:     apiKey.GroupID,
-		Status:      apiKey.Status,
-		IPWhitelist: apiKey.IPWhitelist,
-		IPBlacklist: apiKey.IPBlacklist,
-		Quota:       apiKey.Quota,
-		QuotaUsed:   apiKey.QuotaUsed,
-		ExpiresAt:   apiKey.ExpiresAt,
-		RateLimit5h: apiKey.RateLimit5h,
-		RateLimit1d: apiKey.RateLimit1d,
-		RateLimit7d: apiKey.RateLimit7d,
+		Version:      apiKeyAuthSnapshotVersion,
+		APIKeyID:     apiKey.ID,
+		UserID:       apiKey.UserID,
+		GroupID:      apiKey.GroupID,
+		Status:       apiKey.Status,
+		IPWhitelist:  apiKey.IPWhitelist,
+		IPBlacklist:  apiKey.IPBlacklist,
+		Quota:        apiKey.Quota,
+		QuotaUsed:    apiKey.QuotaUsed,
+		ExpiresAt:    apiKey.ExpiresAt,
+		RateLimit5h:  apiKey.RateLimit5h,
+		RateLimit1d:  apiKey.RateLimit1d,
+		RateLimit7d:  apiKey.RateLimit7d,
+		TierGroupIDs: apiKey.TierGroupIDs,
+		MaxTierDepth: apiKey.MaxTierDepth,
 		User: APIKeyAuthUserSnapshot{
 			ID:                         apiKey.User.ID,
 			Status:                     apiKey.User.Status,
@@ -233,6 +237,8 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			BalanceNotifyExtraEmails:   apiKey.User.BalanceNotifyExtraEmails,
 			TotalRecharged:             apiKey.User.TotalRecharged,
 			RPMLimit:                   apiKey.User.RPMLimit,
+			DefaultTierGroupIDs:        apiKey.User.DefaultTierGroupIDs,
+			AllowedGroups:              apiKey.User.AllowedGroups,
 		},
 	}
 
@@ -269,6 +275,7 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			DefaultMappedModel:              apiKey.Group.DefaultMappedModel,
 			MessagesDispatchModelConfig:     apiKey.Group.MessagesDispatchModelConfig,
 			RPMLimit:                        apiKey.Group.RPMLimit,
+			TierFallbackGroupID:             apiKey.Group.TierFallbackGroupID,
 		}
 	}
 	return snapshot
@@ -279,19 +286,21 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 		return nil
 	}
 	apiKey := &APIKey{
-		ID:          snapshot.APIKeyID,
-		UserID:      snapshot.UserID,
-		GroupID:     snapshot.GroupID,
-		Key:         key,
-		Status:      snapshot.Status,
-		IPWhitelist: snapshot.IPWhitelist,
-		IPBlacklist: snapshot.IPBlacklist,
-		Quota:       snapshot.Quota,
-		QuotaUsed:   snapshot.QuotaUsed,
-		ExpiresAt:   snapshot.ExpiresAt,
-		RateLimit5h: snapshot.RateLimit5h,
-		RateLimit1d: snapshot.RateLimit1d,
-		RateLimit7d: snapshot.RateLimit7d,
+		ID:           snapshot.APIKeyID,
+		UserID:       snapshot.UserID,
+		GroupID:      snapshot.GroupID,
+		Key:          key,
+		Status:       snapshot.Status,
+		IPWhitelist:  snapshot.IPWhitelist,
+		IPBlacklist:  snapshot.IPBlacklist,
+		Quota:        snapshot.Quota,
+		QuotaUsed:    snapshot.QuotaUsed,
+		ExpiresAt:    snapshot.ExpiresAt,
+		RateLimit5h:  snapshot.RateLimit5h,
+		RateLimit1d:  snapshot.RateLimit1d,
+		RateLimit7d:  snapshot.RateLimit7d,
+		TierGroupIDs: snapshot.TierGroupIDs,
+		MaxTierDepth: snapshot.MaxTierDepth,
 		User: &User{
 			ID:                         snapshot.User.ID,
 			Status:                     snapshot.User.Status,
@@ -307,6 +316,8 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			TotalRecharged:             snapshot.User.TotalRecharged,
 			RPMLimit:                   snapshot.User.RPMLimit,
 			UserGroupRPMOverride:       snapshot.User.UserGroupRPMOverride,
+			DefaultTierGroupIDs:        snapshot.User.DefaultTierGroupIDs,
+			AllowedGroups:              snapshot.User.AllowedGroups,
 		},
 	}
 	if snapshot.Group != nil {
@@ -335,6 +346,7 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			DefaultMappedModel:              snapshot.Group.DefaultMappedModel,
 			MessagesDispatchModelConfig:     snapshot.Group.MessagesDispatchModelConfig,
 			RPMLimit:                        snapshot.Group.RPMLimit,
+			TierFallbackGroupID:             snapshot.Group.TierFallbackGroupID,
 		}
 	}
 	s.compileAPIKeyIPRules(apiKey)

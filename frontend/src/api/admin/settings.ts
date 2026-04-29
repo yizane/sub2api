@@ -983,6 +983,16 @@ export async function resetWebSearchUsage(payload: {
   );
 }
 
+export async function getDefaultTierGroupIds(): Promise<{ ids: number[] }> {
+  const { data } = await apiClient.get<{ ids: number[] }>("/admin/settings/default-tier-group-ids");
+  return data;
+}
+
+export async function updateDefaultTierGroupIds(ids: number[]): Promise<{ ids: number[] }> {
+  const { data } = await apiClient.put<{ ids: number[] }>("/admin/settings/default-tier-group-ids", { ids });
+  return data;
+}
+
 export const settingsAPI = {
   getSettings,
   updateSettings,
@@ -1003,6 +1013,8 @@ export const settingsAPI = {
   updateWebSearchEmulationConfig,
   testWebSearchEmulation,
   resetWebSearchUsage,
+  getDefaultTierGroupIds,
+  updateDefaultTierGroupIds,
 };
 
 export default settingsAPI;

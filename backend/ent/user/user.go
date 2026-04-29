@@ -61,6 +61,8 @@ const (
 	FieldTotalRecharged = "total_recharged"
 	// FieldRpmLimit holds the string denoting the rpm_limit field in the database.
 	FieldRpmLimit = "rpm_limit"
+	// FieldDefaultTierGroupIds holds the string denoting the default_tier_group_ids field in the database.
+	FieldDefaultTierGroupIds = "default_tier_group_ids"
 	// EdgeAPIKeys holds the string denoting the api_keys edge name in mutations.
 	EdgeAPIKeys = "api_keys"
 	// EdgeRedeemCodes holds the string denoting the redeem_codes edge name in mutations.
@@ -206,6 +208,7 @@ var Columns = []string{
 	FieldBalanceNotifyExtraEmails,
 	FieldTotalRecharged,
 	FieldRpmLimit,
+	FieldDefaultTierGroupIds,
 }
 
 var (
@@ -276,6 +279,8 @@ var (
 	DefaultTotalRecharged float64
 	// DefaultRpmLimit holds the default value on creation for the "rpm_limit" field.
 	DefaultRpmLimit int
+	// DefaultDefaultTierGroupIds holds the default value on creation for the "default_tier_group_ids" field.
+	DefaultDefaultTierGroupIds []int64
 )
 
 // OrderOption defines the ordering options for the User queries.

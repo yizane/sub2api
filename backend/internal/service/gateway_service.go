@@ -391,6 +391,15 @@ type GatewayCache interface {
 	// DeleteSessionAccountID 删除粘性会话绑定，用于账号不可用时主动清理
 	// Delete sticky session binding, used to proactively clean up when account becomes unavailable
 	DeleteSessionAccountID(ctx context.Context, groupID int64, sessionHash string) error
+
+	// Tier 降级链路粘性：按 (api_key, model scope) 记录当前激活的 tier group ID。
+	// 用途：进入降级 tier 后，同模型后续请求可短期直达该 group，避免反复重走主分组失败链路，
+	// 同时避免一个模型的降级污染其他模型的路由。
+	// TTL 由 Gateway.TierStickyTTL() 控制，过期后下次请求重新从主分组起跳。
+	GetTierStickyGroupID(ctx context.Context, apiKeyID int64, scope string) (int64, error)
+	SetTierStickyGroupID(ctx context.Context, apiKeyID int64, scope string, groupID int64, ttl time.Duration) error
+	RefreshTierStickyTTL(ctx context.Context, apiKeyID int64, scope string, ttl time.Duration) error
+	DeleteTierStickyGroupID(ctx context.Context, apiKeyID int64, scope string) error
 }
 
 // derefGroupID safely dereferences *int64 to int64, returning 0 if nil
@@ -413,6 +422,30 @@ func resolveModelsListCacheTTL(cfg *config.Config) time.Duration {
 		return defaultModelsListCacheTTL
 	}
 	return time.Duration(cfg.Gateway.ModelsListCacheTTLSeconds) * time.Second
+}
+
+// defaultTierStickyTTL tier 粘性窗口默认 5 分钟。0 在用户配置中表示禁用，
+// 但 cfg 未配置（== 0）时默认按 5 分钟启用，由 resolveTierStickyTTL 决定语义。
+const defaultTierStickyTTL = 5 * time.Minute
+
+// resolveTierStickyTTL 解析 tier 粘性 TTL：
+//   - cfg.Gateway.TierStickyTTLMinutes < 0：返回 0（禁用，与用户显式设 0 同义但用 < 0 表达意图）
+//   - cfg.Gateway.TierStickyTTLMinutes == 0：使用默认值 5 分钟
+//   - cfg.Gateway.TierStickyTTLMinutes > 0：使用配置值
+//
+// 这样配置缺省（== 0）时按默认启用，需要禁用必须显式设负数或在 admin UI 上选"禁用"。
+func resolveTierStickyTTL(cfg *config.Config) time.Duration {
+	if cfg == nil {
+		return defaultTierStickyTTL
+	}
+	v := cfg.Gateway.TierStickyTTLMinutes
+	if v < 0 {
+		return 0
+	}
+	if v == 0 {
+		return defaultTierStickyTTL
+	}
+	return time.Duration(v) * time.Minute
 }
 
 func modelsListCacheKey(groupID *int64, platform string) string {
@@ -725,6 +758,109 @@ func (s *GatewayService) GetCachedSessionAccountID(ctx context.Context, groupID 
 		return 0, err
 	}
 	return accountID, nil
+}
+
+// TierStickyTTL 返回 tier 粘性窗口时长（解析自 cfg.Gateway.TierStickyTTLMinutes）。
+// 0 表示禁用粘性。
+func (s *GatewayService) TierStickyTTL() time.Duration {
+	return resolveTierStickyTTL(s.cfg)
+}
+
+// GetCachedTierGroupID 读取 (api_key, model scope) 当前激活的 tier group ID。返回 0 表示未粘住或粘性已禁用。
+// 错误（含 redis.Nil 未命中）一律按未粘住处理。
+func (s *GatewayService) GetCachedTierGroupID(ctx context.Context, apiKeyID int64, scope string) int64 {
+	scope = normalizeTierStickyScope(scope)
+	if apiKeyID <= 0 || scope == "" || s.cache == nil || s.TierStickyTTL() <= 0 {
+		return 0
+	}
+	id, err := s.cache.GetTierStickyGroupID(ctx, apiKeyID, scope)
+	if err != nil {
+		return 0
+	}
+	return id
+}
+
+// BindTierSticky 写入 tier 粘性。仅在新 tier 首次成功转发后调用。
+func (s *GatewayService) BindTierSticky(ctx context.Context, apiKeyID int64, scope string, groupID int64) error {
+	ttl := s.TierStickyTTL()
+	scope = normalizeTierStickyScope(scope)
+	if ttl <= 0 || apiKeyID <= 0 || scope == "" || groupID <= 0 || s.cache == nil {
+		return nil
+	}
+	return s.cache.SetTierStickyGroupID(ctx, apiKeyID, scope, groupID, ttl)
+}
+
+// RefreshTierSticky 刷新 tier 粘性 TTL，每次成功命中已粘住的 tier 时调用。
+func (s *GatewayService) RefreshTierSticky(ctx context.Context, apiKeyID int64, scope string) error {
+	ttl := s.TierStickyTTL()
+	scope = normalizeTierStickyScope(scope)
+	if ttl <= 0 || apiKeyID <= 0 || scope == "" || s.cache == nil {
+		return nil
+	}
+	return s.cache.RefreshTierStickyTTL(ctx, apiKeyID, scope, ttl)
+}
+
+// ClearTierSticky 删除 tier 粘性，用于检测到粘住的 group 已失效（删除/禁用/不在链路）时主动清理。
+func (s *GatewayService) ClearTierSticky(ctx context.Context, apiKeyID int64, scope string) error {
+	scope = normalizeTierStickyScope(scope)
+	if apiKeyID <= 0 || scope == "" || s.cache == nil {
+		return nil
+	}
+	return s.cache.DeleteTierStickyGroupID(ctx, apiKeyID, scope)
+}
+
+// GetActiveSubscriptionForGroup 查询用户对特定分组的有效订阅，供 tier swap 计费校验使用。
+// 不存在或查询出错时返回 nil（调用方回退到余额模式）。
+func (s *GatewayService) GetActiveSubscriptionForGroup(ctx context.Context, userID, groupID int64) *UserSubscription {
+	if s.userSubRepo == nil || userID <= 0 || groupID <= 0 {
+		return nil
+	}
+	sub, err := s.userSubRepo.GetActiveByUserIDAndGroupID(ctx, userID, groupID)
+	if err != nil || sub == nil {
+		return nil
+	}
+	return sub
+}
+
+// IsTierGroupCandidate 检查 groupID 是否仍在当前 apiKey 的 tier 候选链路中。
+// 用于粘性恢复时验证 sticky group 没有被管理员从链路移除。
+//
+// sticky 里存储的是 resolveGatewayGroup 之后的实际 group ID（可能因 CCO/fallback 链路
+// 与原始候选 ID 不同），因此同时检查原始候选 ID 和解析后的 resolved ID。
+func (s *GatewayService) IsTierGroupCandidate(ctx context.Context, apiKey *APIKey, groupID int64) bool {
+	if apiKey == nil || groupID <= 0 {
+		return false
+	}
+	candidates := s.resolveTierCandidates(ctx, apiKey)
+	for _, id := range candidates {
+		if id == groupID {
+			return true
+		}
+		// 原始候选 ID 可能经过 CCO/fallback 解析映射到不同 group，一并检查。
+		cid := id
+		_, resolvedID, err := s.resolveGatewayGroup(ctx, &cid)
+		if err == nil && resolvedID != nil && *resolvedID == groupID {
+			return true
+		}
+	}
+	return false
+}
+
+// GetTierGroupDepth 返回 groupID 在当前 apiKey tier 候选链路中的 1-based 位置。
+// 返回 0 表示不在候选列表（IsTierGroupCandidate 应已先验证，正常流程不会出现）。
+//
+// 同 IsTierGroupCandidate，同时匹配原始候选 ID 和 resolveGatewayGroup 后的 resolved ID。
+func (s *GatewayService) GetTierGroupDepth(ctx context.Context, apiKey *APIKey, groupID int64) int {
+	if apiKey == nil || groupID <= 0 {
+		return 0
+	}
+	candidates := s.resolveUsableTierCandidates(ctx, apiKey)
+	for i, candidate := range candidates {
+		if candidate.candidateID == groupID || candidate.resolvedID == groupID {
+			return i + 1
+		}
+	}
+	return 0
 }
 
 // FindGeminiSession 查找 Gemini 会话（基于内容摘要链的 Fallback 匹配）
@@ -1997,6 +2133,46 @@ func (s *GatewayService) resolveGroupByID(ctx context.Context, groupID int64) (*
 
 func (s *GatewayService) ResolveGroupByID(ctx context.Context, groupID int64) (*Group, error) {
 	return s.resolveGroupByID(ctx, groupID)
+}
+
+func (s *GatewayService) ResolveGatewayGroup(ctx context.Context, groupID *int64) (*Group, *int64, error) {
+	return s.resolveGatewayGroup(ctx, groupID)
+}
+
+func (s *GatewayService) ResolveTierVisitedPrefix(ctx context.Context, apiKey *APIKey, depth int) []int64 {
+	if apiKey == nil || depth <= 0 {
+		return nil
+	}
+
+	candidates := s.resolveUsableTierCandidates(ctx, apiKey)
+	if len(candidates) == 0 {
+		return nil
+	}
+	if depth > len(candidates) {
+		depth = len(candidates)
+	}
+
+	visited := make([]int64, 0, depth*2+1)
+	seen := make(map[int64]struct{}, depth*2+1)
+	appendID := func(id int64) {
+		if id <= 0 {
+			return
+		}
+		if _, ok := seen[id]; ok {
+			return
+		}
+		seen[id] = struct{}{}
+		visited = append(visited, id)
+	}
+
+	if apiKey.GroupID != nil {
+		appendID(*apiKey.GroupID)
+	}
+	for _, candidate := range candidates[:depth] {
+		appendID(candidate.candidateID)
+		appendID(candidate.resolvedID)
+	}
+	return visited
 }
 
 func (s *GatewayService) routingAccountIDsForRequest(ctx context.Context, groupID *int64, requestedModel string, platform string) []int64 {

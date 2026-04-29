@@ -25,6 +25,10 @@ type APIKeyAuthSnapshot struct {
 	RateLimit5h float64 `json:"rate_limit_5h"`
 	RateLimit1d float64 `json:"rate_limit_1d"`
 	RateLimit7d float64 `json:"rate_limit_7d"`
+
+	// Tier fallback chain (per-key)
+	TierGroupIDs []int64 `json:"tier_group_ids,omitempty"`
+	MaxTierDepth int     `json:"max_tier_depth,omitempty"`
 }
 
 // APIKeyAuthUserSnapshot 用户快照
@@ -50,6 +54,12 @@ type APIKeyAuthUserSnapshot struct {
 	// UserGroupRPMOverride 该 API Key 对应的 (user, group) 专属 RPM 覆盖值。
 	// nil = 无 override（回退到 group/user 级）；0 = 不限流；>0 = 专属上限。
 	UserGroupRPMOverride *int `json:"user_group_rpm_override,omitempty"`
+
+	// DefaultTierGroupIDs 用户级 tier 降级链路默认值；api_key.tier_group_ids 为空时兜底。
+	DefaultTierGroupIDs []int64 `json:"default_tier_group_ids,omitempty"`
+
+	// AllowedGroups 用户对专属分组的访问权限；tier 解析时运行时 ACL 校验会使用。
+	AllowedGroups []int64 `json:"allowed_groups,omitempty"`
 }
 
 // APIKeyAuthGroupSnapshot 分组快照
@@ -86,6 +96,11 @@ type APIKeyAuthGroupSnapshot struct {
 
 	// RPMLimit 分组级每分钟请求数上限（0 = 不限制）；用于 billing_cache_service.checkRPM 级联判断。
 	RPMLimit int `json:"rpm_limit"`
+
+	// TierFallbackGroupID 基础设施级 tier 链路单指针；与 FallbackGroupID（CCO）和
+	// FallbackGroupIDOnInvalidRequest（无效请求触发）语义独立。仅在 api_key/user/系统设置的
+	// tier 列表都为空时作为兜底使用，由 GatewayService.walkGroupTierChain 沿链递归。
+	TierFallbackGroupID *int64 `json:"tier_fallback_group_id,omitempty"`
 }
 
 // APIKeyAuthCacheEntry 缓存条目，支持负缓存

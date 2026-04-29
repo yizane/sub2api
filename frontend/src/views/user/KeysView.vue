@@ -439,6 +439,35 @@
           </Select>
         </div>
 
+        <!-- Tier Fallback Chain -->
+        <div class="space-y-2">
+          <label class="input-label mb-0">{{ t('keys.tierFallbackChain') }}</label>
+          <template v-if="tierEditorEnabled">
+            <TierGroupChainEditor
+              v-model="formData.tier_group_ids"
+              :groups="tierGroupOptions"
+              :exclude-ids="formData.group_id ? [formData.group_id] : []"
+              :placeholder-text="t('keys.selectTierGroup')"
+              :search-placeholder-text="t('keys.searchGroup')"
+              :add-button-text="t('keys.addTierGroup')"
+              :hint-text="t('keys.tierFallbackHint')"
+            />
+            <div class="flex items-center gap-3 pt-1">
+              <label class="input-label mb-0 text-xs">{{ t('keys.maxTierDepth') }}</label>
+              <input
+                v-model.number="formData.max_tier_depth"
+                type="number"
+                min="0"
+                step="1"
+                class="input w-24 text-sm"
+                placeholder="0"
+              />
+              <span class="text-xs text-gray-400 dark:text-gray-500">{{ t('keys.maxTierDepthHint') }}</span>
+            </div>
+          </template>
+          <p v-else class="input-hint">{{ selectedPrimaryGroup ? t('keys.tierFallbackOpenAIOnly') : t('keys.tierFallbackRequiresPrimaryGroup') }}</p>
+        </div>
+
         <!-- Custom Key Section (only for create) -->
         <div v-if="!showEditModal" class="space-y-3">
           <div class="flex items-center justify-between">
@@ -1045,7 +1074,7 @@
 </template>
 
 <script setup lang="ts">
-	import { ref, computed, onMounted, onUnmounted, type ComponentPublicInstance } from 'vue'
+	import { ref, computed, onMounted, onUnmounted, watch, type ComponentPublicInstance } from 'vue'
 	import { useI18n } from 'vue-i18n'
 	import { useAppStore } from '@/stores/app'
 	import { useOnboardingStore } from '@/stores/onboarding'
@@ -1068,6 +1097,7 @@ import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 	import EndpointPopover from '@/components/keys/EndpointPopover.vue'
 	import GroupBadge from '@/components/common/GroupBadge.vue'
 	import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
+import TierGroupChainEditor from '@/components/TierGroupChainEditor.vue'
 	import type { ApiKey, Group, PublicSettings, SubscriptionType, GroupPlatform } from '@/types'
 import type { Column } from '@/components/common/types'
 import type { BatchApiKeyUsageStats } from '@/api/usage'
@@ -1183,8 +1213,13 @@ const formData = ref({
   rate_limit_7d: null as number | null,
   enable_expiration: false,
   expiration_preset: '30' as '7' | '30' | '90' | 'custom',
-  expiration_date: ''
+  expiration_date: '',
+  tier_group_ids: [] as number[],
+  max_tier_depth: 0
 })
+
+const sameNumberArray = (a: number[], b: number[]) =>
+  a.length === b.length && a.every((value, index) => value === b[index])
 
 // 自定义Key验证
 const customKeyError = computed(() => {
@@ -1249,6 +1284,43 @@ const groupOptions = computed(() =>
     platform: group.platform
   }))
 )
+
+// Tier group options (simpler, just id + name)
+const selectedPrimaryGroup = computed(() =>
+  groups.value.find((group) => group.id === formData.value.group_id) ?? null
+)
+
+const tierEditorEnabled = computed(() => selectedPrimaryGroup.value?.platform === 'openai')
+
+const tierGroupOptions = computed(() => {
+  if (!tierEditorEnabled.value) {
+    return []
+  }
+  return groups.value
+    .filter((group) => group.platform === 'openai' && group.status === 'active')
+    .map((group) => ({
+      value: group.id,
+      label: group.name,
+    }))
+})
+
+watch(() => selectedPrimaryGroup.value?.platform ?? null, (platform) => {
+  if (platform !== 'openai') {
+    formData.value.tier_group_ids = []
+    formData.value.max_tier_depth = 0
+    return
+  }
+
+  const validGroupIDs = new Set(
+    groups.value
+      .filter((group) => group.platform === 'openai' && group.status === 'active')
+      .map((group) => group.id)
+  )
+
+  formData.value.tier_group_ids = formData.value.tier_group_ids.filter((groupID) =>
+    validGroupIDs.has(groupID)
+  )
+})
 
 // Group dropdown search
 const groupSearchQuery = ref('')
@@ -1404,7 +1476,9 @@ const editKey = (key: ApiKey) => {
     rate_limit_7d: key.rate_limit_7d || null,
     enable_expiration: hasExpiration,
     expiration_preset: 'custom',
-    expiration_date: key.expires_at ? formatDateTimeLocal(key.expires_at) : ''
+    expiration_date: key.expires_at ? formatDateTimeLocal(key.expires_at) : '',
+    tier_group_ids: key.tier_group_ids || [],
+    max_tier_depth: key.max_tier_depth || 0,
   }
   showEditModal.value = true
 }
@@ -1538,7 +1612,7 @@ const handleSubmit = async () => {
   submitting.value = true
   try {
     if (showEditModal.value && selectedKey.value) {
-      await keysAPI.update(selectedKey.value.id, {
+      const updates: Record<string, unknown> = {
         name: formData.value.name,
         group_id: formData.value.group_id,
         status: formData.value.status,
@@ -1549,7 +1623,16 @@ const handleSubmit = async () => {
         rate_limit_5h: rateLimitData.rate_limit_5h,
         rate_limit_1d: rateLimitData.rate_limit_1d,
         rate_limit_7d: rateLimitData.rate_limit_7d,
-      })
+      }
+      const originalTierGroupIDs = selectedKey.value.tier_group_ids ?? []
+      const originalMaxTierDepth = selectedKey.value.max_tier_depth ?? 0
+      if (!sameNumberArray(formData.value.tier_group_ids, originalTierGroupIDs)) {
+        updates.tier_group_ids = formData.value.tier_group_ids
+      }
+      if (formData.value.max_tier_depth !== originalMaxTierDepth) {
+        updates.max_tier_depth = formData.value.max_tier_depth
+      }
+      await keysAPI.update(selectedKey.value.id, updates)
       appStore.showSuccess(t('keys.keyUpdatedSuccess'))
     } else {
       const customKey = formData.value.use_custom_key ? formData.value.custom_key : undefined
@@ -1561,7 +1644,9 @@ const handleSubmit = async () => {
         ipBlacklist,
         quota,
         expiresInDays,
-        rateLimitData
+        rateLimitData,
+        formData.value.tier_group_ids.length > 0 ? formData.value.tier_group_ids : undefined,
+        formData.value.max_tier_depth > 0 ? formData.value.max_tier_depth : undefined
       )
       appStore.showSuccess(t('keys.keyCreatedSuccess'))
       // Only advance tour if active, on submit step, and creation succeeded
@@ -1621,7 +1706,9 @@ const closeModals = () => {
     rate_limit_7d: null,
     enable_expiration: false,
     expiration_preset: '30',
-    expiration_date: ''
+    expiration_date: '',
+    tier_group_ids: [],
+    max_tier_depth: 0,
   }
 }
 

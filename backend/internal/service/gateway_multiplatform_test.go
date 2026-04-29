@@ -234,6 +234,18 @@ func (m *mockGatewayCacheForPlatform) DeleteSessionAccountID(ctx context.Context
 	delete(m.sessionBindings, sessionHash)
 	return nil
 }
+func (m *mockGatewayCacheForPlatform) GetTierStickyGroupID(_ context.Context, _ int64, _ string) (int64, error) {
+	return 0, nil
+}
+func (m *mockGatewayCacheForPlatform) SetTierStickyGroupID(_ context.Context, _ int64, _ string, _ int64, _ time.Duration) error {
+	return nil
+}
+func (m *mockGatewayCacheForPlatform) RefreshTierStickyTTL(_ context.Context, _ int64, _ string, _ time.Duration) error {
+	return nil
+}
+func (m *mockGatewayCacheForPlatform) DeleteTierStickyGroupID(_ context.Context, _ int64, _ string) error {
+	return nil
+}
 
 type mockGroupRepoForGateway struct {
 	groups           map[int64]*Group

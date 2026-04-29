@@ -35,6 +35,8 @@ type Group struct {
 	FallbackGroupID *int64
 	// 无效请求兜底分组（仅 anthropic 平台使用）
 	FallbackGroupIDOnInvalidRequest *int64
+	// Tier 降级链单指针（基础设施级兜底）；与上面两个 fallback 语义独立
+	TierFallbackGroupID *int64
 
 	// 模型路由配置
 	// key: 模型匹配模式（支持 * 通配符，如 "claude-opus-*"）
@@ -78,6 +80,10 @@ func (g *Group) IsActive() bool {
 
 func (g *Group) IsSubscriptionType() bool {
 	return g.SubscriptionType == SubscriptionTypeSubscription
+}
+
+func (g *Group) IsOpenAI() bool {
+	return g != nil && strings.TrimSpace(g.Platform) == PlatformOpenAI
 }
 
 func (g *Group) HasDailyLimit() bool {

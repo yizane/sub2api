@@ -148,6 +148,18 @@ func (c *schedulerTestGatewayCache) DeleteSessionAccountID(ctx context.Context, 
 	delete(c.sessionBindings, sessionHash)
 	return nil
 }
+func (c *schedulerTestGatewayCache) GetTierStickyGroupID(_ context.Context, _ int64, _ string) (int64, error) {
+	return 0, nil
+}
+func (c *schedulerTestGatewayCache) SetTierStickyGroupID(_ context.Context, _ int64, _ string, _ int64, _ time.Duration) error {
+	return nil
+}
+func (c *schedulerTestGatewayCache) RefreshTierStickyTTL(_ context.Context, _ int64, _ string, _ time.Duration) error {
+	return nil
+}
+func (c *schedulerTestGatewayCache) DeleteTierStickyGroupID(_ context.Context, _ int64, _ string) error {
+	return nil
+}
 
 func newSchedulerTestOpenAIWSV2Config() *config.Config {
 	cfg := &config.Config{}

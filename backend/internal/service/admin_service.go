@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -112,14 +113,15 @@ type AdminService interface {
 
 // CreateUserInput represents input for creating a new user via admin operations.
 type CreateUserInput struct {
-	Email         string
-	Password      string
-	Username      string
-	Notes         string
-	Balance       float64
-	Concurrency   int
-	RPMLimit      int
-	AllowedGroups []int64
+	Email               string
+	Password            string
+	Username            string
+	Notes               string
+	Balance             float64
+	Concurrency         int
+	RPMLimit            int
+	AllowedGroups       []int64
+	DefaultTierGroupIDs []int64
 }
 
 type UpdateUserInput struct {
@@ -135,6 +137,8 @@ type UpdateUserInput struct {
 	// GroupRates 用户专属分组倍率配置
 	// map[groupID]*rate，nil 表示删除该分组的专属倍率
 	GroupRates map[int64]*float64
+	// DefaultTierGroupIDs 用户级 tier 降级链路（nil = 不变，[] = 清空）
+	DefaultTierGroupIDs *[]int64
 }
 
 type AdminBindAuthIdentityInput struct {
@@ -193,6 +197,8 @@ type CreateGroupInput struct {
 	FallbackGroupID *int64 // 降级分组 ID
 	// 无效请求兜底分组 ID（仅 anthropic 平台使用）
 	FallbackGroupIDOnInvalidRequest *int64
+	// 独立 tier 降级链单指针（与 FallbackGroupID/CCO 和 FallbackGroupIDOnInvalidRequest 语义独立）
+	TierFallbackGroupID *int64
 	// 模型路由配置（仅 anthropic 平台使用）
 	ModelRouting        map[string][]int64
 	ModelRoutingEnabled bool // 是否启用模型路由
@@ -230,6 +236,8 @@ type UpdateGroupInput struct {
 	FallbackGroupID *int64 // 降级分组 ID
 	// 无效请求兜底分组 ID（仅 anthropic 平台使用）
 	FallbackGroupIDOnInvalidRequest *int64
+	// 独立 tier 降级链单指针；nil=不修改，0=清除，>0=设置
+	TierFallbackGroupID *int64
 	// 模型路由配置（仅 anthropic 平台使用）
 	ModelRouting        map[string][]int64
 	ModelRoutingEnabled *bool // 是否启用模型路由
@@ -641,16 +649,25 @@ func (s *adminServiceImpl) GetUser(ctx context.Context, id int64) (*User, error)
 }
 
 func (s *adminServiceImpl) CreateUser(ctx context.Context, input *CreateUserInput) (*User, error) {
+	validatedTierIDs := input.DefaultTierGroupIDs
+	if len(validatedTierIDs) > 0 {
+		var err error
+		validatedTierIDs, err = validateAdminTierGroupIDs(ctx, s.groupRepo, validatedTierIDs)
+		if err != nil {
+			return nil, infraerrors.BadRequest("INVALID_TIER_GROUP", err.Error())
+		}
+	}
 	user := &User{
-		Email:         input.Email,
-		Username:      input.Username,
-		Notes:         input.Notes,
-		Role:          RoleUser, // Always create as regular user, never admin
-		Balance:       input.Balance,
-		Concurrency:   input.Concurrency,
-		RPMLimit:      input.RPMLimit,
-		Status:        StatusActive,
-		AllowedGroups: input.AllowedGroups,
+		Email:               input.Email,
+		Username:            input.Username,
+		Notes:               input.Notes,
+		Role:                RoleUser, // Always create as regular user, never admin
+		Balance:             input.Balance,
+		Concurrency:         input.Concurrency,
+		RPMLimit:            input.RPMLimit,
+		Status:              StatusActive,
+		AllowedGroups:       input.AllowedGroups,
+		DefaultTierGroupIDs: validatedTierIDs,
 	}
 	if err := user.SetPassword(input.Password); err != nil {
 		return nil, err
@@ -660,6 +677,45 @@ func (s *adminServiceImpl) CreateUser(ctx context.Context, input *CreateUserInpu
 	}
 	s.assignDefaultSubscriptions(ctx, user.ID)
 	return user, nil
+}
+
+func (s *adminServiceImpl) validateTierFallbackGroupTarget(ctx context.Context, currentGroupID int64, primaryPlatform string, groupID int64) error {
+	if strings.TrimSpace(primaryPlatform) != PlatformOpenAI {
+		return fmt.Errorf("tier_fallback_group_id only supported for OpenAI groups")
+	}
+	if _, err := validateAdminTierGroupIDs(ctx, s.groupRepo, []int64{groupID}); err != nil {
+		return fmt.Errorf("tier_fallback_group_id: %w", err)
+	}
+	target, err := s.groupRepo.GetByIDLite(ctx, groupID)
+	if err != nil {
+		return fmt.Errorf("tier_fallback_group_id: %w", err)
+	}
+	if target == nil {
+		return fmt.Errorf("tier_fallback_group_id: group %d not found", groupID)
+	}
+	if strings.TrimSpace(target.Platform) != PlatformOpenAI {
+		return fmt.Errorf("tier_fallback_group_id target must be an OpenAI group")
+	}
+	if currentGroupID > 0 {
+		visited := map[int64]struct{}{currentGroupID: {}}
+		nextID := groupID
+		for i := 0; i < 16; i++ {
+			if _, seen := visited[nextID]; seen {
+				return fmt.Errorf("tier_fallback_group_id cycle detected")
+			}
+			visited[nextID] = struct{}{}
+
+			nextGroup, err := s.groupRepo.GetByIDLite(ctx, nextID)
+			if err != nil {
+				return fmt.Errorf("tier_fallback_group_id: %w", err)
+			}
+			if nextGroup == nil || nextGroup.TierFallbackGroupID == nil || *nextGroup.TierFallbackGroupID <= 0 {
+				break
+			}
+			nextID = *nextGroup.TierFallbackGroupID
+		}
+	}
+	return nil
 }
 
 func (s *adminServiceImpl) assignDefaultSubscriptions(ctx context.Context, userID int64) {
@@ -703,6 +759,8 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 	oldStatus := user.Status
 	oldRole := user.Role
 	oldRPMLimit := user.RPMLimit
+	oldAllowedGroups := append([]int64(nil), user.AllowedGroups...)
+	tierDefaultsChanged := false
 
 	if input.Email != "" {
 		user.Email = input.Email
@@ -736,6 +794,16 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 		user.AllowedGroups = *input.AllowedGroups
 	}
 
+	if input.DefaultTierGroupIDs != nil {
+		// 校验：去重 + 必须存在 + 必须 active；其他校验（如用户允许范围）由 admin 负责
+		validated, err := validateAdminTierGroupIDs(ctx, s.groupRepo, *input.DefaultTierGroupIDs)
+		if err != nil {
+			return nil, infraerrors.BadRequest("INVALID_TIER_GROUP", err.Error())
+		}
+		user.DefaultTierGroupIDs = validated
+		tierDefaultsChanged = true
+	}
+
 	if err := s.userRepo.Update(ctx, user); err != nil {
 		return nil, err
 	}
@@ -750,7 +818,7 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 	if s.authCacheInvalidator != nil {
 		// RPMLimit 直接参与 billing_cache_service.checkRPM 的三级级联，
 		// 不失效缓存会让修改在一个 L2 TTL 内失去效果。
-		if user.Concurrency != oldConcurrency || user.Status != oldStatus || user.Role != oldRole || user.RPMLimit != oldRPMLimit {
+		if user.Concurrency != oldConcurrency || user.Status != oldStatus || user.Role != oldRole || user.RPMLimit != oldRPMLimit || !reflect.DeepEqual(user.AllowedGroups, oldAllowedGroups) || tierDefaultsChanged {
 			s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, user.ID)
 		}
 	}
@@ -1364,6 +1432,16 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 			return nil, err
 		}
 	}
+	// 校验 tier 降级链单指针
+	tierFallbackGroupID := input.TierFallbackGroupID
+	if tierFallbackGroupID != nil && *tierFallbackGroupID <= 0 {
+		tierFallbackGroupID = nil
+	}
+	if tierFallbackGroupID != nil {
+		if err := s.validateTierFallbackGroupTarget(ctx, 0, platform, *tierFallbackGroupID); err != nil {
+			return nil, err
+		}
+	}
 
 	// MCPXMLInject：默认为 true，仅当显式传入 false 时关闭
 	mcpXMLInject := true
@@ -1420,6 +1498,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		ClaudeCodeOnly:                  input.ClaudeCodeOnly,
 		FallbackGroupID:                 input.FallbackGroupID,
 		FallbackGroupIDOnInvalidRequest: fallbackOnInvalidRequest,
+		TierFallbackGroupID:             tierFallbackGroupID,
 		ModelRouting:                    input.ModelRouting,
 		MCPXMLInject:                    mcpXMLInject,
 		SupportedModelScopes:            input.SupportedModelScopes,
@@ -1630,6 +1709,27 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 		}
 	}
 	group.FallbackGroupIDOnInvalidRequest = fallbackOnInvalidRequest
+
+	// tier 降级链单指针
+	if input.TierFallbackGroupID != nil {
+		if *input.TierFallbackGroupID > 0 {
+			if *input.TierFallbackGroupID == id {
+				return nil, errors.New("tier_fallback_group_id cannot point to the group itself")
+			}
+			if err := s.validateTierFallbackGroupTarget(ctx, id, group.Platform, *input.TierFallbackGroupID); err != nil {
+				return nil, err
+			}
+			group.TierFallbackGroupID = input.TierFallbackGroupID
+		} else {
+			// 0 或负数表示清除
+			group.TierFallbackGroupID = nil
+		}
+	}
+	if group.TierFallbackGroupID != nil {
+		if err := s.validateTierFallbackGroupTarget(ctx, id, group.Platform, *group.TierFallbackGroupID); err != nil {
+			return nil, err
+		}
+	}
 
 	// 模型路由配置
 	if input.ModelRouting != nil {

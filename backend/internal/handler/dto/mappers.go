@@ -65,11 +65,16 @@ func UserFromServiceAdmin(u *service.User) *AdminUser {
 	if base == nil {
 		return nil
 	}
+	tierIDs := u.DefaultTierGroupIDs
+	if tierIDs == nil {
+		tierIDs = []int64{}
+	}
 	return &AdminUser{
-		User:       *base,
-		Notes:      u.Notes,
-		LastUsedAt: u.LastUsedAt,
-		GroupRates: u.GroupRates,
+		User:                *base,
+		Notes:               u.Notes,
+		LastUsedAt:          u.LastUsedAt,
+		GroupRates:          u.GroupRates,
+		DefaultTierGroupIDs: tierIDs,
 	}
 }
 
@@ -103,6 +108,8 @@ func APIKeyFromService(k *service.APIKey) *APIKey {
 		Window7dStart: k.Window7dStart,
 		User:          UserFromServiceShallow(k.User),
 		Group:         GroupFromServiceShallow(k.Group),
+		TierGroupIDs:  k.TierGroupIDs,
+		MaxTierDepth:  k.MaxTierDepth,
 	}
 	if k.Window5hStart != nil && !service.IsWindowExpired(k.Window5hStart, service.RateLimitWindow5h) {
 		t := k.Window5hStart.Add(service.RateLimitWindow5h)
@@ -182,6 +189,7 @@ func groupFromServiceBase(g *service.Group) Group {
 		ClaudeCodeOnly:                  g.ClaudeCodeOnly,
 		FallbackGroupID:                 g.FallbackGroupID,
 		FallbackGroupIDOnInvalidRequest: g.FallbackGroupIDOnInvalidRequest,
+		TierFallbackGroupID:             g.TierFallbackGroupID,
 		AllowMessagesDispatch:           g.AllowMessagesDispatch,
 		RequireOAuthOnly:                g.RequireOAuthOnly,
 		RequirePrivacySet:               g.RequirePrivacySet,

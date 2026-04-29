@@ -350,6 +350,45 @@ func TestAPIKeyService_GetByKey_IgnoresLegacyAuthCacheSnapshotWithoutMessagesDis
 	require.Equal(t, "gpt-5.4-nano", apiKey.Group.MessagesDispatchModelConfig.OpusMappedModel)
 }
 
+func TestAPIKeyService_SnapshotRoundTripPreservesAllowedGroups(t *testing.T) {
+	svc := NewAPIKeyService(nil, nil, nil, nil, nil, nil, &config.Config{})
+	groupID := int64(9)
+	apiKey := &APIKey{
+		ID:      1,
+		UserID:  2,
+		GroupID: &groupID,
+		Key:     "k-allowed",
+		Status:  StatusActive,
+		User: &User{
+			ID:            2,
+			Status:        StatusActive,
+			Role:          RoleUser,
+			Balance:       10,
+			Concurrency:   3,
+			AllowedGroups: []int64{9, 11},
+		},
+		Group: &Group{
+			ID:                          groupID,
+			Name:                        "g",
+			Platform:                    PlatformAnthropic,
+			Status:                      StatusActive,
+			SubscriptionType:            SubscriptionTypeStandard,
+			RateMultiplier:              1,
+			AllowMessagesDispatch:       true,
+			ModelRoutingEnabled:         true,
+			MessagesDispatchModelConfig: OpenAIMessagesDispatchModelConfig{},
+		},
+	}
+
+	snapshot := svc.snapshotFromAPIKey(context.Background(), apiKey)
+	require.Equal(t, []int64{9, 11}, snapshot.User.AllowedGroups)
+
+	roundTrip := svc.snapshotToAPIKey(apiKey.Key, snapshot)
+	require.NotNil(t, roundTrip)
+	require.NotNil(t, roundTrip.User)
+	require.Equal(t, []int64{9, 11}, roundTrip.User.AllowedGroups)
+}
+
 func TestAPIKeyService_GetByKey_NegativeCache(t *testing.T) {
 	cache := &authCacheStub{}
 	repo := &authRepoStub{

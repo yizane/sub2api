@@ -422,6 +422,9 @@ func registerSettingsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		adminSettings.PUT("/web-search-emulation", h.Admin.Setting.UpdateWebSearchEmulationConfig)
 		adminSettings.POST("/web-search-emulation/test", h.Admin.Setting.TestWebSearchEmulation)
 		adminSettings.POST("/web-search-emulation/reset-usage", h.Admin.Setting.ResetWebSearchUsage)
+		// 系统级 tier 降级链默认配置
+		adminSettings.GET("/default-tier-group-ids", h.Admin.Setting.GetDefaultTierGroupIDs)
+		adminSettings.PUT("/default-tier-group-ids", h.Admin.Setting.UpdateDefaultTierGroupIDs)
 	}
 }
 

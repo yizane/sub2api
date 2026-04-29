@@ -98,51 +98,55 @@ const (
 // APIKeyMutation represents an operation that mutates the APIKey nodes in the graph.
 type APIKeyMutation struct {
 	config
-	op                 Op
-	typ                string
-	id                 *int64
-	created_at         *time.Time
-	updated_at         *time.Time
-	deleted_at         *time.Time
-	key                *string
-	name               *string
-	status             *string
-	last_used_at       *time.Time
-	ip_whitelist       *[]string
-	appendip_whitelist []string
-	ip_blacklist       *[]string
-	appendip_blacklist []string
-	quota              *float64
-	addquota           *float64
-	quota_used         *float64
-	addquota_used      *float64
-	expires_at         *time.Time
-	rate_limit_5h      *float64
-	addrate_limit_5h   *float64
-	rate_limit_1d      *float64
-	addrate_limit_1d   *float64
-	rate_limit_7d      *float64
-	addrate_limit_7d   *float64
-	usage_5h           *float64
-	addusage_5h        *float64
-	usage_1d           *float64
-	addusage_1d        *float64
-	usage_7d           *float64
-	addusage_7d        *float64
-	window_5h_start    *time.Time
-	window_1d_start    *time.Time
-	window_7d_start    *time.Time
-	clearedFields      map[string]struct{}
-	user               *int64
-	cleareduser        bool
-	group              *int64
-	clearedgroup       bool
-	usage_logs         map[int64]struct{}
-	removedusage_logs  map[int64]struct{}
-	clearedusage_logs  bool
-	done               bool
-	oldValue           func(context.Context) (*APIKey, error)
-	predicates         []predicate.APIKey
+	op                   Op
+	typ                  string
+	id                   *int64
+	created_at           *time.Time
+	updated_at           *time.Time
+	deleted_at           *time.Time
+	key                  *string
+	name                 *string
+	status               *string
+	last_used_at         *time.Time
+	ip_whitelist         *[]string
+	appendip_whitelist   []string
+	ip_blacklist         *[]string
+	appendip_blacklist   []string
+	quota                *float64
+	addquota             *float64
+	quota_used           *float64
+	addquota_used        *float64
+	expires_at           *time.Time
+	rate_limit_5h        *float64
+	addrate_limit_5h     *float64
+	rate_limit_1d        *float64
+	addrate_limit_1d     *float64
+	rate_limit_7d        *float64
+	addrate_limit_7d     *float64
+	usage_5h             *float64
+	addusage_5h          *float64
+	usage_1d             *float64
+	addusage_1d          *float64
+	usage_7d             *float64
+	addusage_7d          *float64
+	window_5h_start      *time.Time
+	window_1d_start      *time.Time
+	window_7d_start      *time.Time
+	tier_group_ids       *[]int64
+	appendtier_group_ids []int64
+	max_tier_depth       *int
+	addmax_tier_depth    *int
+	clearedFields        map[string]struct{}
+	user                 *int64
+	cleareduser          bool
+	group                *int64
+	clearedgroup         bool
+	usage_logs           map[int64]struct{}
+	removedusage_logs    map[int64]struct{}
+	clearedusage_logs    bool
+	done                 bool
+	oldValue             func(context.Context) (*APIKey, error)
+	predicates           []predicate.APIKey
 }
 
 var _ ent.Mutation = (*APIKeyMutation)(nil)
@@ -1380,6 +1384,127 @@ func (m *APIKeyMutation) ResetWindow7dStart() {
 	delete(m.clearedFields, apikey.FieldWindow7dStart)
 }
 
+// SetTierGroupIds sets the "tier_group_ids" field.
+func (m *APIKeyMutation) SetTierGroupIds(i []int64) {
+	m.tier_group_ids = &i
+	m.appendtier_group_ids = nil
+}
+
+// TierGroupIds returns the value of the "tier_group_ids" field in the mutation.
+func (m *APIKeyMutation) TierGroupIds() (r []int64, exists bool) {
+	v := m.tier_group_ids
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTierGroupIds returns the old "tier_group_ids" field's value of the APIKey entity.
+// If the APIKey object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *APIKeyMutation) OldTierGroupIds(ctx context.Context) (v []int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTierGroupIds is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTierGroupIds requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTierGroupIds: %w", err)
+	}
+	return oldValue.TierGroupIds, nil
+}
+
+// AppendTierGroupIds adds i to the "tier_group_ids" field.
+func (m *APIKeyMutation) AppendTierGroupIds(i []int64) {
+	m.appendtier_group_ids = append(m.appendtier_group_ids, i...)
+}
+
+// AppendedTierGroupIds returns the list of values that were appended to the "tier_group_ids" field in this mutation.
+func (m *APIKeyMutation) AppendedTierGroupIds() ([]int64, bool) {
+	if len(m.appendtier_group_ids) == 0 {
+		return nil, false
+	}
+	return m.appendtier_group_ids, true
+}
+
+// ClearTierGroupIds clears the value of the "tier_group_ids" field.
+func (m *APIKeyMutation) ClearTierGroupIds() {
+	m.tier_group_ids = nil
+	m.appendtier_group_ids = nil
+	m.clearedFields[apikey.FieldTierGroupIds] = struct{}{}
+}
+
+// TierGroupIdsCleared returns if the "tier_group_ids" field was cleared in this mutation.
+func (m *APIKeyMutation) TierGroupIdsCleared() bool {
+	_, ok := m.clearedFields[apikey.FieldTierGroupIds]
+	return ok
+}
+
+// ResetTierGroupIds resets all changes to the "tier_group_ids" field.
+func (m *APIKeyMutation) ResetTierGroupIds() {
+	m.tier_group_ids = nil
+	m.appendtier_group_ids = nil
+	delete(m.clearedFields, apikey.FieldTierGroupIds)
+}
+
+// SetMaxTierDepth sets the "max_tier_depth" field.
+func (m *APIKeyMutation) SetMaxTierDepth(i int) {
+	m.max_tier_depth = &i
+	m.addmax_tier_depth = nil
+}
+
+// MaxTierDepth returns the value of the "max_tier_depth" field in the mutation.
+func (m *APIKeyMutation) MaxTierDepth() (r int, exists bool) {
+	v := m.max_tier_depth
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldMaxTierDepth returns the old "max_tier_depth" field's value of the APIKey entity.
+// If the APIKey object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *APIKeyMutation) OldMaxTierDepth(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldMaxTierDepth is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldMaxTierDepth requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldMaxTierDepth: %w", err)
+	}
+	return oldValue.MaxTierDepth, nil
+}
+
+// AddMaxTierDepth adds i to the "max_tier_depth" field.
+func (m *APIKeyMutation) AddMaxTierDepth(i int) {
+	if m.addmax_tier_depth != nil {
+		*m.addmax_tier_depth += i
+	} else {
+		m.addmax_tier_depth = &i
+	}
+}
+
+// AddedMaxTierDepth returns the value that was added to the "max_tier_depth" field in this mutation.
+func (m *APIKeyMutation) AddedMaxTierDepth() (r int, exists bool) {
+	v := m.addmax_tier_depth
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetMaxTierDepth resets all changes to the "max_tier_depth" field.
+func (m *APIKeyMutation) ResetMaxTierDepth() {
+	m.max_tier_depth = nil
+	m.addmax_tier_depth = nil
+}
+
 // ClearUser clears the "user" edge to the User entity.
 func (m *APIKeyMutation) ClearUser() {
 	m.cleareduser = true
@@ -1522,7 +1647,7 @@ func (m *APIKeyMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *APIKeyMutation) Fields() []string {
-	fields := make([]string, 0, 23)
+	fields := make([]string, 0, 25)
 	if m.created_at != nil {
 		fields = append(fields, apikey.FieldCreatedAt)
 	}
@@ -1592,6 +1717,12 @@ func (m *APIKeyMutation) Fields() []string {
 	if m.window_7d_start != nil {
 		fields = append(fields, apikey.FieldWindow7dStart)
 	}
+	if m.tier_group_ids != nil {
+		fields = append(fields, apikey.FieldTierGroupIds)
+	}
+	if m.max_tier_depth != nil {
+		fields = append(fields, apikey.FieldMaxTierDepth)
+	}
 	return fields
 }
 
@@ -1646,6 +1777,10 @@ func (m *APIKeyMutation) Field(name string) (ent.Value, bool) {
 		return m.Window1dStart()
 	case apikey.FieldWindow7dStart:
 		return m.Window7dStart()
+	case apikey.FieldTierGroupIds:
+		return m.TierGroupIds()
+	case apikey.FieldMaxTierDepth:
+		return m.MaxTierDepth()
 	}
 	return nil, false
 }
@@ -1701,6 +1836,10 @@ func (m *APIKeyMutation) OldField(ctx context.Context, name string) (ent.Value, 
 		return m.OldWindow1dStart(ctx)
 	case apikey.FieldWindow7dStart:
 		return m.OldWindow7dStart(ctx)
+	case apikey.FieldTierGroupIds:
+		return m.OldTierGroupIds(ctx)
+	case apikey.FieldMaxTierDepth:
+		return m.OldMaxTierDepth(ctx)
 	}
 	return nil, fmt.Errorf("unknown APIKey field %s", name)
 }
@@ -1871,6 +2010,20 @@ func (m *APIKeyMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetWindow7dStart(v)
 		return nil
+	case apikey.FieldTierGroupIds:
+		v, ok := value.([]int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTierGroupIds(v)
+		return nil
+	case apikey.FieldMaxTierDepth:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetMaxTierDepth(v)
+		return nil
 	}
 	return fmt.Errorf("unknown APIKey field %s", name)
 }
@@ -1903,6 +2056,9 @@ func (m *APIKeyMutation) AddedFields() []string {
 	if m.addusage_7d != nil {
 		fields = append(fields, apikey.FieldUsage7d)
 	}
+	if m.addmax_tier_depth != nil {
+		fields = append(fields, apikey.FieldMaxTierDepth)
+	}
 	return fields
 }
 
@@ -1927,6 +2083,8 @@ func (m *APIKeyMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedUsage1d()
 	case apikey.FieldUsage7d:
 		return m.AddedUsage7d()
+	case apikey.FieldMaxTierDepth:
+		return m.AddedMaxTierDepth()
 	}
 	return nil, false
 }
@@ -1992,6 +2150,13 @@ func (m *APIKeyMutation) AddField(name string, value ent.Value) error {
 		}
 		m.AddUsage7d(v)
 		return nil
+	case apikey.FieldMaxTierDepth:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddMaxTierDepth(v)
+		return nil
 	}
 	return fmt.Errorf("unknown APIKey numeric field %s", name)
 }
@@ -2026,6 +2191,9 @@ func (m *APIKeyMutation) ClearedFields() []string {
 	}
 	if m.FieldCleared(apikey.FieldWindow7dStart) {
 		fields = append(fields, apikey.FieldWindow7dStart)
+	}
+	if m.FieldCleared(apikey.FieldTierGroupIds) {
+		fields = append(fields, apikey.FieldTierGroupIds)
 	}
 	return fields
 }
@@ -2067,6 +2235,9 @@ func (m *APIKeyMutation) ClearField(name string) error {
 		return nil
 	case apikey.FieldWindow7dStart:
 		m.ClearWindow7dStart()
+		return nil
+	case apikey.FieldTierGroupIds:
+		m.ClearTierGroupIds()
 		return nil
 	}
 	return fmt.Errorf("unknown APIKey nullable field %s", name)
@@ -2144,6 +2315,12 @@ func (m *APIKeyMutation) ResetField(name string) error {
 		return nil
 	case apikey.FieldWindow7dStart:
 		m.ResetWindow7dStart()
+		return nil
+	case apikey.FieldTierGroupIds:
+		m.ResetTierGroupIds()
+		return nil
+	case apikey.FieldMaxTierDepth:
+		m.ResetMaxTierDepth()
 		return nil
 	}
 	return fmt.Errorf("unknown APIKey field %s", name)
@@ -14775,6 +14952,8 @@ type GroupMutation struct {
 	addfallback_group_id                    *int64
 	fallback_group_id_on_invalid_request    *int64
 	addfallback_group_id_on_invalid_request *int64
+	tier_fallback_group_id                  *int64
+	addtier_fallback_group_id               *int64
 	model_routing                           *map[string][]int64
 	model_routing_enabled                   *bool
 	mcp_xml_inject                          *bool
@@ -15969,6 +16148,76 @@ func (m *GroupMutation) ResetFallbackGroupIDOnInvalidRequest() {
 	delete(m.clearedFields, group.FieldFallbackGroupIDOnInvalidRequest)
 }
 
+// SetTierFallbackGroupID sets the "tier_fallback_group_id" field.
+func (m *GroupMutation) SetTierFallbackGroupID(i int64) {
+	m.tier_fallback_group_id = &i
+	m.addtier_fallback_group_id = nil
+}
+
+// TierFallbackGroupID returns the value of the "tier_fallback_group_id" field in the mutation.
+func (m *GroupMutation) TierFallbackGroupID() (r int64, exists bool) {
+	v := m.tier_fallback_group_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTierFallbackGroupID returns the old "tier_fallback_group_id" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldTierFallbackGroupID(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTierFallbackGroupID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTierFallbackGroupID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTierFallbackGroupID: %w", err)
+	}
+	return oldValue.TierFallbackGroupID, nil
+}
+
+// AddTierFallbackGroupID adds i to the "tier_fallback_group_id" field.
+func (m *GroupMutation) AddTierFallbackGroupID(i int64) {
+	if m.addtier_fallback_group_id != nil {
+		*m.addtier_fallback_group_id += i
+	} else {
+		m.addtier_fallback_group_id = &i
+	}
+}
+
+// AddedTierFallbackGroupID returns the value that was added to the "tier_fallback_group_id" field in this mutation.
+func (m *GroupMutation) AddedTierFallbackGroupID() (r int64, exists bool) {
+	v := m.addtier_fallback_group_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearTierFallbackGroupID clears the value of the "tier_fallback_group_id" field.
+func (m *GroupMutation) ClearTierFallbackGroupID() {
+	m.tier_fallback_group_id = nil
+	m.addtier_fallback_group_id = nil
+	m.clearedFields[group.FieldTierFallbackGroupID] = struct{}{}
+}
+
+// TierFallbackGroupIDCleared returns if the "tier_fallback_group_id" field was cleared in this mutation.
+func (m *GroupMutation) TierFallbackGroupIDCleared() bool {
+	_, ok := m.clearedFields[group.FieldTierFallbackGroupID]
+	return ok
+}
+
+// ResetTierFallbackGroupID resets all changes to the "tier_fallback_group_id" field.
+func (m *GroupMutation) ResetTierFallbackGroupID() {
+	m.tier_fallback_group_id = nil
+	m.addtier_fallback_group_id = nil
+	delete(m.clearedFields, group.FieldTierFallbackGroupID)
+}
+
 // SetModelRouting sets the "model_routing" field.
 func (m *GroupMutation) SetModelRouting(value map[string][]int64) {
 	m.model_routing = &value
@@ -16791,7 +17040,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 31)
+	fields := make([]string, 0, 32)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -16851,6 +17100,9 @@ func (m *GroupMutation) Fields() []string {
 	}
 	if m.fallback_group_id_on_invalid_request != nil {
 		fields = append(fields, group.FieldFallbackGroupIDOnInvalidRequest)
+	}
+	if m.tier_fallback_group_id != nil {
+		fields = append(fields, group.FieldTierFallbackGroupID)
 	}
 	if m.model_routing != nil {
 		fields = append(fields, group.FieldModelRouting)
@@ -16933,6 +17185,8 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.FallbackGroupID()
 	case group.FieldFallbackGroupIDOnInvalidRequest:
 		return m.FallbackGroupIDOnInvalidRequest()
+	case group.FieldTierFallbackGroupID:
+		return m.TierFallbackGroupID()
 	case group.FieldModelRouting:
 		return m.ModelRouting()
 	case group.FieldModelRoutingEnabled:
@@ -17004,6 +17258,8 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldFallbackGroupID(ctx)
 	case group.FieldFallbackGroupIDOnInvalidRequest:
 		return m.OldFallbackGroupIDOnInvalidRequest(ctx)
+	case group.FieldTierFallbackGroupID:
+		return m.OldTierFallbackGroupID(ctx)
 	case group.FieldModelRouting:
 		return m.OldModelRouting(ctx)
 	case group.FieldModelRoutingEnabled:
@@ -17175,6 +17431,13 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetFallbackGroupIDOnInvalidRequest(v)
 		return nil
+	case group.FieldTierFallbackGroupID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTierFallbackGroupID(v)
+		return nil
 	case group.FieldModelRouting:
 		v, ok := value.(map[string][]int64)
 		if !ok {
@@ -17290,6 +17553,9 @@ func (m *GroupMutation) AddedFields() []string {
 	if m.addfallback_group_id_on_invalid_request != nil {
 		fields = append(fields, group.FieldFallbackGroupIDOnInvalidRequest)
 	}
+	if m.addtier_fallback_group_id != nil {
+		fields = append(fields, group.FieldTierFallbackGroupID)
+	}
 	if m.addsort_order != nil {
 		fields = append(fields, group.FieldSortOrder)
 	}
@@ -17324,6 +17590,8 @@ func (m *GroupMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedFallbackGroupID()
 	case group.FieldFallbackGroupIDOnInvalidRequest:
 		return m.AddedFallbackGroupIDOnInvalidRequest()
+	case group.FieldTierFallbackGroupID:
+		return m.AddedTierFallbackGroupID()
 	case group.FieldSortOrder:
 		return m.AddedSortOrder()
 	case group.FieldRpmLimit:
@@ -17407,6 +17675,13 @@ func (m *GroupMutation) AddField(name string, value ent.Value) error {
 		}
 		m.AddFallbackGroupIDOnInvalidRequest(v)
 		return nil
+	case group.FieldTierFallbackGroupID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddTierFallbackGroupID(v)
+		return nil
 	case group.FieldSortOrder:
 		v, ok := value.(int)
 		if !ok {
@@ -17459,6 +17734,9 @@ func (m *GroupMutation) ClearedFields() []string {
 	if m.FieldCleared(group.FieldFallbackGroupIDOnInvalidRequest) {
 		fields = append(fields, group.FieldFallbackGroupIDOnInvalidRequest)
 	}
+	if m.FieldCleared(group.FieldTierFallbackGroupID) {
+		fields = append(fields, group.FieldTierFallbackGroupID)
+	}
 	if m.FieldCleared(group.FieldModelRouting) {
 		fields = append(fields, group.FieldModelRouting)
 	}
@@ -17505,6 +17783,9 @@ func (m *GroupMutation) ClearField(name string) error {
 		return nil
 	case group.FieldFallbackGroupIDOnInvalidRequest:
 		m.ClearFallbackGroupIDOnInvalidRequest()
+		return nil
+	case group.FieldTierFallbackGroupID:
+		m.ClearTierFallbackGroupID()
 		return nil
 	case group.FieldModelRouting:
 		m.ClearModelRouting()
@@ -17576,6 +17857,9 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldFallbackGroupIDOnInvalidRequest:
 		m.ResetFallbackGroupIDOnInvalidRequest()
+		return nil
+	case group.FieldTierFallbackGroupID:
+		m.ResetTierFallbackGroupID()
 		return nil
 	case group.FieldModelRouting:
 		m.ResetModelRouting()
@@ -37455,6 +37739,8 @@ type UserMutation struct {
 	addtotal_recharged            *float64
 	rpm_limit                     *int
 	addrpm_limit                  *int
+	default_tier_group_ids        *[]int64
+	appenddefault_tier_group_ids  []int64
 	clearedFields                 map[string]struct{}
 	api_keys                      map[int64]struct{}
 	removedapi_keys               map[int64]struct{}
@@ -38602,6 +38888,71 @@ func (m *UserMutation) ResetRpmLimit() {
 	m.addrpm_limit = nil
 }
 
+// SetDefaultTierGroupIds sets the "default_tier_group_ids" field.
+func (m *UserMutation) SetDefaultTierGroupIds(i []int64) {
+	m.default_tier_group_ids = &i
+	m.appenddefault_tier_group_ids = nil
+}
+
+// DefaultTierGroupIds returns the value of the "default_tier_group_ids" field in the mutation.
+func (m *UserMutation) DefaultTierGroupIds() (r []int64, exists bool) {
+	v := m.default_tier_group_ids
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldDefaultTierGroupIds returns the old "default_tier_group_ids" field's value of the User entity.
+// If the User object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserMutation) OldDefaultTierGroupIds(ctx context.Context) (v []int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldDefaultTierGroupIds is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldDefaultTierGroupIds requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldDefaultTierGroupIds: %w", err)
+	}
+	return oldValue.DefaultTierGroupIds, nil
+}
+
+// AppendDefaultTierGroupIds adds i to the "default_tier_group_ids" field.
+func (m *UserMutation) AppendDefaultTierGroupIds(i []int64) {
+	m.appenddefault_tier_group_ids = append(m.appenddefault_tier_group_ids, i...)
+}
+
+// AppendedDefaultTierGroupIds returns the list of values that were appended to the "default_tier_group_ids" field in this mutation.
+func (m *UserMutation) AppendedDefaultTierGroupIds() ([]int64, bool) {
+	if len(m.appenddefault_tier_group_ids) == 0 {
+		return nil, false
+	}
+	return m.appenddefault_tier_group_ids, true
+}
+
+// ClearDefaultTierGroupIds clears the value of the "default_tier_group_ids" field.
+func (m *UserMutation) ClearDefaultTierGroupIds() {
+	m.default_tier_group_ids = nil
+	m.appenddefault_tier_group_ids = nil
+	m.clearedFields[user.FieldDefaultTierGroupIds] = struct{}{}
+}
+
+// DefaultTierGroupIdsCleared returns if the "default_tier_group_ids" field was cleared in this mutation.
+func (m *UserMutation) DefaultTierGroupIdsCleared() bool {
+	_, ok := m.clearedFields[user.FieldDefaultTierGroupIds]
+	return ok
+}
+
+// ResetDefaultTierGroupIds resets all changes to the "default_tier_group_ids" field.
+func (m *UserMutation) ResetDefaultTierGroupIds() {
+	m.default_tier_group_ids = nil
+	m.appenddefault_tier_group_ids = nil
+	delete(m.clearedFields, user.FieldDefaultTierGroupIds)
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by ids.
 func (m *UserMutation) AddAPIKeyIDs(ids ...int64) {
 	if m.api_keys == nil {
@@ -39284,7 +39635,7 @@ func (m *UserMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UserMutation) Fields() []string {
-	fields := make([]string, 0, 23)
+	fields := make([]string, 0, 24)
 	if m.created_at != nil {
 		fields = append(fields, user.FieldCreatedAt)
 	}
@@ -39354,6 +39705,9 @@ func (m *UserMutation) Fields() []string {
 	if m.rpm_limit != nil {
 		fields = append(fields, user.FieldRpmLimit)
 	}
+	if m.default_tier_group_ids != nil {
+		fields = append(fields, user.FieldDefaultTierGroupIds)
+	}
 	return fields
 }
 
@@ -39408,6 +39762,8 @@ func (m *UserMutation) Field(name string) (ent.Value, bool) {
 		return m.TotalRecharged()
 	case user.FieldRpmLimit:
 		return m.RpmLimit()
+	case user.FieldDefaultTierGroupIds:
+		return m.DefaultTierGroupIds()
 	}
 	return nil, false
 }
@@ -39463,6 +39819,8 @@ func (m *UserMutation) OldField(ctx context.Context, name string) (ent.Value, er
 		return m.OldTotalRecharged(ctx)
 	case user.FieldRpmLimit:
 		return m.OldRpmLimit(ctx)
+	case user.FieldDefaultTierGroupIds:
+		return m.OldDefaultTierGroupIds(ctx)
 	}
 	return nil, fmt.Errorf("unknown User field %s", name)
 }
@@ -39633,6 +39991,13 @@ func (m *UserMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetRpmLimit(v)
 		return nil
+	case user.FieldDefaultTierGroupIds:
+		v, ok := value.([]int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetDefaultTierGroupIds(v)
+		return nil
 	}
 	return fmt.Errorf("unknown User field %s", name)
 }
@@ -39744,6 +40109,9 @@ func (m *UserMutation) ClearedFields() []string {
 	if m.FieldCleared(user.FieldBalanceNotifyThreshold) {
 		fields = append(fields, user.FieldBalanceNotifyThreshold)
 	}
+	if m.FieldCleared(user.FieldDefaultTierGroupIds) {
+		fields = append(fields, user.FieldDefaultTierGroupIds)
+	}
 	return fields
 }
 
@@ -39775,6 +40143,9 @@ func (m *UserMutation) ClearField(name string) error {
 		return nil
 	case user.FieldBalanceNotifyThreshold:
 		m.ClearBalanceNotifyThreshold()
+		return nil
+	case user.FieldDefaultTierGroupIds:
+		m.ClearDefaultTierGroupIds()
 		return nil
 	}
 	return fmt.Errorf("unknown User nullable field %s", name)
@@ -39852,6 +40223,9 @@ func (m *UserMutation) ResetField(name string) error {
 		return nil
 	case user.FieldRpmLimit:
 		m.ResetRpmLimit()
+		return nil
+	case user.FieldDefaultTierGroupIds:
+		m.ResetDefaultTierGroupIds()
 		return nil
 	}
 	return fmt.Errorf("unknown User field %s", name)

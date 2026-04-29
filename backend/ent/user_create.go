@@ -339,6 +339,12 @@ func (_c *UserCreate) SetNillableRpmLimit(v *int) *UserCreate {
 	return _c
 }
 
+// SetDefaultTierGroupIds sets the "default_tier_group_ids" field.
+func (_c *UserCreate) SetDefaultTierGroupIds(v []int64) *UserCreate {
+	_c.mutation.SetDefaultTierGroupIds(v)
+	return _c
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_c *UserCreate) AddAPIKeyIDs(ids ...int64) *UserCreate {
 	_c.mutation.AddAPIKeyIDs(ids...)
@@ -622,6 +628,10 @@ func (_c *UserCreate) defaults() error {
 		v := user.DefaultRpmLimit
 		_c.mutation.SetRpmLimit(v)
 	}
+	if _, ok := _c.mutation.DefaultTierGroupIds(); !ok {
+		v := user.DefaultDefaultTierGroupIds
+		_c.mutation.SetDefaultTierGroupIds(v)
+	}
 	return nil
 }
 
@@ -826,6 +836,10 @@ func (_c *UserCreate) createSpec() (*User, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.RpmLimit(); ok {
 		_spec.SetField(user.FieldRpmLimit, field.TypeInt, value)
 		_node.RpmLimit = value
+	}
+	if value, ok := _c.mutation.DefaultTierGroupIds(); ok {
+		_spec.SetField(user.FieldDefaultTierGroupIds, field.TypeJSON, value)
+		_node.DefaultTierGroupIds = value
 	}
 	if nodes := _c.mutation.APIKeysIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -1405,6 +1419,24 @@ func (u *UserUpsert) AddRpmLimit(v int) *UserUpsert {
 	return u
 }
 
+// SetDefaultTierGroupIds sets the "default_tier_group_ids" field.
+func (u *UserUpsert) SetDefaultTierGroupIds(v []int64) *UserUpsert {
+	u.Set(user.FieldDefaultTierGroupIds, v)
+	return u
+}
+
+// UpdateDefaultTierGroupIds sets the "default_tier_group_ids" field to the value that was provided on create.
+func (u *UserUpsert) UpdateDefaultTierGroupIds() *UserUpsert {
+	u.SetExcluded(user.FieldDefaultTierGroupIds)
+	return u
+}
+
+// ClearDefaultTierGroupIds clears the value of the "default_tier_group_ids" field.
+func (u *UserUpsert) ClearDefaultTierGroupIds() *UserUpsert {
+	u.SetNull(user.FieldDefaultTierGroupIds)
+	return u
+}
+
 // UpdateNewValues updates the mutable fields using the new values that were set on create.
 // Using this option is equivalent to using:
 //
@@ -1832,6 +1864,27 @@ func (u *UserUpsertOne) AddRpmLimit(v int) *UserUpsertOne {
 func (u *UserUpsertOne) UpdateRpmLimit() *UserUpsertOne {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdateRpmLimit()
+	})
+}
+
+// SetDefaultTierGroupIds sets the "default_tier_group_ids" field.
+func (u *UserUpsertOne) SetDefaultTierGroupIds(v []int64) *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.SetDefaultTierGroupIds(v)
+	})
+}
+
+// UpdateDefaultTierGroupIds sets the "default_tier_group_ids" field to the value that was provided on create.
+func (u *UserUpsertOne) UpdateDefaultTierGroupIds() *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateDefaultTierGroupIds()
+	})
+}
+
+// ClearDefaultTierGroupIds clears the value of the "default_tier_group_ids" field.
+func (u *UserUpsertOne) ClearDefaultTierGroupIds() *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.ClearDefaultTierGroupIds()
 	})
 }
 
@@ -2428,6 +2481,27 @@ func (u *UserUpsertBulk) AddRpmLimit(v int) *UserUpsertBulk {
 func (u *UserUpsertBulk) UpdateRpmLimit() *UserUpsertBulk {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdateRpmLimit()
+	})
+}
+
+// SetDefaultTierGroupIds sets the "default_tier_group_ids" field.
+func (u *UserUpsertBulk) SetDefaultTierGroupIds(v []int64) *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.SetDefaultTierGroupIds(v)
+	})
+}
+
+// UpdateDefaultTierGroupIds sets the "default_tier_group_ids" field to the value that was provided on create.
+func (u *UserUpsertBulk) UpdateDefaultTierGroupIds() *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateDefaultTierGroupIds()
+	})
+}
+
+// ClearDefaultTierGroupIds clears the value of the "default_tier_group_ids" field.
+func (u *UserUpsertBulk) ClearDefaultTierGroupIds() *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.ClearDefaultTierGroupIds()
 	})
 }
 

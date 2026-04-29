@@ -1246,6 +1246,17 @@
           </p>
         </div>
 
+        <!-- Tier 降级链单指针 -->
+        <div v-if="createForm.platform === 'openai'" class="border-t pt-4">
+          <label class="input-label">{{ t("admin.groups.tierFallback.title") }}</label>
+          <Select
+            v-model="createForm.tier_fallback_group_id"
+            :options="tierFallbackGroupOptions"
+            :placeholder="t('admin.groups.tierFallback.noFallback')"
+          />
+          <p class="input-hint">{{ t("admin.groups.tierFallback.hint") }}</p>
+        </div>
+
         <!-- 模型路由配置（仅 anthropic 平台） -->
         <div v-if="createForm.platform === 'anthropic'" class="border-t pt-4">
           <div class="mb-1.5 flex items-center gap-1">
@@ -2377,6 +2388,17 @@
           </p>
         </div>
 
+        <!-- Tier 降级链单指针 -->
+        <div v-if="editForm.platform === 'openai'" class="border-t pt-4">
+          <label class="input-label">{{ t("admin.groups.tierFallback.title") }}</label>
+          <Select
+            v-model="editForm.tier_fallback_group_id"
+            :options="tierFallbackGroupOptionsForEdit"
+            :placeholder="t('admin.groups.tierFallback.noFallback')"
+          />
+          <p class="input-hint">{{ t("admin.groups.tierFallback.hint") }}</p>
+        </div>
+
         <!-- 模型路由配置（仅 anthropic 平台） -->
         <div v-if="editForm.platform === 'anthropic'" class="border-t pt-4">
           <div class="mb-1.5 flex items-center gap-1">
@@ -2881,6 +2903,34 @@ const fallbackGroupOptionsForEdit = computed(() => {
   return options;
 });
 
+// Tier 降级链单指针选项（创建时）- 仅包含相同平台的活跃分组
+const tierFallbackGroupOptions = computed(() => {
+  const options: { value: number | null; label: string }[] = [
+    { value: null, label: t("admin.groups.tierFallback.noFallback") },
+  ]
+  groups.value
+    .filter((g) => g.status === "active" && g.platform === "openai")
+    .forEach((g) => options.push({ value: g.id, label: g.name }))
+  return options
+})
+
+// Tier 降级链单指针选项（编辑时）- 仅包含相同平台的活跃分组，排除自身
+const tierFallbackGroupOptionsForEdit = computed(() => {
+  const options: { value: number | null; label: string }[] = [
+    { value: null, label: t("admin.groups.tierFallback.noFallback") },
+  ]
+  const currentId = editingGroup.value?.id
+  groups.value
+    .filter(
+      (g) =>
+        g.status === "active" &&
+        g.platform === "openai" &&
+        g.id !== currentId,
+    )
+    .forEach((g) => options.push({ value: g.id, label: g.name }))
+  return options
+})
+
 // 无效请求兜底分组选项（创建时）- 仅包含 anthropic 平台、非订阅且未配置兜底的分组
 const invalidRequestFallbackOptions = computed(() => {
   const options: { value: number | null; label: string }[] = [
@@ -3017,6 +3067,7 @@ const createForm = reactive({
   claude_code_only: false,
   fallback_group_id: null as number | null,
   fallback_group_id_on_invalid_request: null as number | null,
+  tier_fallback_group_id: null as number | null,
   // OpenAI Messages 调度配置（仅 openai 平台使用）
   allow_messages_dispatch: false,
   opus_mapped_model: createMessagesDispatchDefaults.opus_mapped_model,
@@ -3299,6 +3350,7 @@ const editForm = reactive({
   claude_code_only: false,
   fallback_group_id: null as number | null,
   fallback_group_id_on_invalid_request: null as number | null,
+  tier_fallback_group_id: null as number | null,
   // OpenAI Messages 调度配置（仅 openai 平台使用）
   allow_messages_dispatch: false,
   default_mapped_model: '',
@@ -3485,6 +3537,7 @@ const closeCreateModal = () => {
   createForm.claude_code_only = false;
   createForm.fallback_group_id = null;
   createForm.fallback_group_id_on_invalid_request = null;
+  createForm.tier_fallback_group_id = null;
   resetMessagesDispatchFormState(createForm);
   createForm.require_oauth_only = false;
   createForm.require_privacy_set = false;
@@ -3589,6 +3642,7 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.fallback_group_id = group.fallback_group_id;
   editForm.fallback_group_id_on_invalid_request =
     group.fallback_group_id_on_invalid_request;
+  editForm.tier_fallback_group_id = group.tier_fallback_group_id ?? null;
   const messagesDispatchFormState = messagesDispatchConfigToFormState(
     group.messages_dispatch_model_config,
   );
@@ -3657,6 +3711,8 @@ const handleUpdateGroup = async () => {
         editForm.fallback_group_id_on_invalid_request === null
           ? 0
           : editForm.fallback_group_id_on_invalid_request,
+      tier_fallback_group_id:
+        editForm.tier_fallback_group_id === null ? 0 : editForm.tier_fallback_group_id,
       model_routing: convertRoutingRulesToApiFormat(
         editModelRoutingRules.value,
       ),
@@ -3760,6 +3816,20 @@ watch(
 watch(
   () => createForm.platform,
   (newVal) => {
+    if (
+      createForm.tier_fallback_group_id !== null &&
+      !groups.value.some(
+        (g) =>
+          g.id === createForm.tier_fallback_group_id &&
+          g.status === "active" &&
+          g.platform === "openai",
+      )
+    ) {
+      createForm.tier_fallback_group_id = null;
+    }
+    if (newVal !== "openai") {
+      createForm.tier_fallback_group_id = null;
+    }
     if (!["anthropic", "antigravity"].includes(newVal)) {
       createForm.fallback_group_id_on_invalid_request = null;
     }
@@ -3776,6 +3846,21 @@ watch(
 watch(
   () => editForm.platform,
   (newVal) => {
+    if (
+      editForm.tier_fallback_group_id !== null &&
+      !groups.value.some(
+        (g) =>
+          g.id === editForm.tier_fallback_group_id &&
+          g.status === "active" &&
+          g.platform === "openai" &&
+          g.id !== editingGroup.value?.id,
+      )
+    ) {
+      editForm.tier_fallback_group_id = null;
+    }
+    if (newVal !== "openai") {
+      editForm.tier_fallback_group_id = null;
+    }
     if (!["anthropic", "antigravity"].includes(newVal)) {
       editForm.fallback_group_id_on_invalid_request = null;
     }

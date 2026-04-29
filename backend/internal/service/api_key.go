@@ -60,6 +60,11 @@ type APIKey struct {
 	Window5hStart *time.Time // Start of current 5h window
 	Window1dStart *time.Time // Start of current 1d window
 	Window7dStart *time.Time // Start of current 7d window
+
+	// Tier fallback chain: 主分组所有账号失败时按顺序切换到下一档 group。
+	// 优先级：apiKey.TierGroupIDs > user.DefaultTierGroupIDs > 系统设置 > group.TierFallbackGroupID 链路。
+	TierGroupIDs []int64 // 每 key 独立的有序降级 group 链路（空列表表示走兜底解析）
+	MaxTierDepth int     // 链路最大深度，0 = 不限制
 }
 
 func (k *APIKey) IsActive() bool {

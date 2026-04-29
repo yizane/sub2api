@@ -42,7 +42,8 @@ type AdminUser struct {
 	LastUsedAt *time.Time `json:"last_used_at"`
 	// GroupRates 用户专属分组倍率配置
 	// map[groupID]rateMultiplier
-	GroupRates map[int64]float64 `json:"group_rates,omitempty"`
+	GroupRates          map[int64]float64 `json:"group_rates,omitempty"`
+	DefaultTierGroupIDs []int64           `json:"default_tier_group_ids"`
 }
 
 type APIKey struct {
@@ -75,6 +76,10 @@ type APIKey struct {
 	Reset1dAt     *time.Time `json:"reset_1d_at,omitempty"`
 	Reset7dAt     *time.Time `json:"reset_7d_at,omitempty"`
 
+	// Tier fallback chain
+	TierGroupIDs []int64 `json:"tier_group_ids"`
+	MaxTierDepth int     `json:"max_tier_depth"`
+
 	User  *User  `json:"user,omitempty"`
 	Group *Group `json:"group,omitempty"`
 }
@@ -103,6 +108,8 @@ type Group struct {
 	FallbackGroupID *int64 `json:"fallback_group_id"`
 	// 无效请求兜底分组
 	FallbackGroupIDOnInvalidRequest *int64 `json:"fallback_group_id_on_invalid_request"`
+	// Tier 降级链单指针（与 fallback_group_id/CCO 语义独立）
+	TierFallbackGroupID *int64 `json:"tier_fallback_group_id"`
 
 	// OpenAI Messages 调度开关（用户侧需要此字段判断是否展示 Claude Code 教程）
 	AllowMessagesDispatch bool `json:"allow_messages_dispatch"`

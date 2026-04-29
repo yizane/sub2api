@@ -2681,3 +2681,52 @@ func (h *SettingHandler) TestWebSearchEmulation(c *gin.Context) {
 	}
 	response.Success(c, result)
 }
+
+// GetDefaultTierGroupIDs 获取系统级 tier 降级链默认配置
+// GET /api/v1/admin/settings/default-tier-group-ids
+func (h *SettingHandler) GetDefaultTierGroupIDs(c *gin.Context) {
+	ids, err := h.settingService.GetSystemDefaultTierGroupIDs(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if ids == nil {
+		ids = []int64{}
+	}
+	response.Success(c, gin.H{"ids": ids})
+}
+
+// UpdateDefaultTierGroupIDsRequest 更新系统级 tier 降级链请求
+type UpdateDefaultTierGroupIDsRequest struct {
+	IDs []int64 `json:"ids"`
+}
+
+// UpdateDefaultTierGroupIDs 更新系统级 tier 降级链默认配置
+// PUT /api/v1/admin/settings/default-tier-group-ids
+func (h *SettingHandler) UpdateDefaultTierGroupIDs(c *gin.Context) {
+	var req UpdateDefaultTierGroupIDsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	if req.IDs == nil {
+		req.IDs = []int64{}
+	}
+	if err := h.settingService.SetSystemDefaultTierGroupIDs(c.Request.Context(), req.IDs); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	// Auth-cache invalidation is NOT needed here: GetSystemDefaultTierGroupIDs is called
+	// live from DB during tier resolution (not stored in auth snapshots), so existing
+	// cached snapshots remain correct — they simply fall through to the updated DB value
+	// on the next failover attempt.
+	ids, err := h.settingService.GetSystemDefaultTierGroupIDs(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if ids == nil {
+		ids = []int64{}
+	}
+	response.Success(c, gin.H{"ids": ids})
+}

@@ -790,6 +790,26 @@ func TestAdminService_CreateGroup_InvalidRequestFallbackClearsOnZero(t *testing.
 	require.Nil(t, repo.created.FallbackGroupIDOnInvalidRequest)
 }
 
+func TestAdminService_CreateGroup_TierFallbackRejectsPlatformMismatch(t *testing.T) {
+	tierFallbackID := int64(10)
+	repo := &groupRepoStubForInvalidRequestFallback{
+		groups: map[int64]*Group{
+			tierFallbackID: {ID: tierFallbackID, Platform: PlatformOpenAI, Status: StatusActive},
+		},
+	}
+	svc := &adminServiceImpl{groupRepo: repo}
+
+	_, err := svc.CreateGroup(context.Background(), &CreateGroupInput{
+		Name:                "g1",
+		Platform:            PlatformAnthropic,
+		RateMultiplier:      1.0,
+		TierFallbackGroupID: &tierFallbackID,
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "tier_fallback_group_id only supported for OpenAI groups")
+	require.Nil(t, repo.created)
+}
+
 func TestAdminService_UpdateGroup_InvalidRequestFallbackPlatformMismatch(t *testing.T) {
 	fallbackID := int64(10)
 	existing := &Group{
@@ -946,4 +966,91 @@ func TestAdminService_UpdateGroup_InvalidRequestFallbackAllowsAntigravity(t *tes
 	require.NotNil(t, group)
 	require.NotNil(t, repo.updated)
 	require.Equal(t, fallbackID, *repo.updated.FallbackGroupIDOnInvalidRequest)
+}
+
+func TestAdminService_UpdateGroup_TierFallbackRejectsPlatformMismatch(t *testing.T) {
+	tierFallbackID := int64(10)
+	existing := &Group{
+		ID:       1,
+		Name:     "g1",
+		Platform: PlatformAnthropic,
+		Status:   StatusActive,
+	}
+	repo := &groupRepoStubForInvalidRequestFallback{
+		groups: map[int64]*Group{
+			existing.ID:    existing,
+			tierFallbackID: {ID: tierFallbackID, Platform: PlatformOpenAI, Status: StatusActive},
+		},
+	}
+	svc := &adminServiceImpl{groupRepo: repo}
+
+	_, err := svc.UpdateGroup(context.Background(), existing.ID, &UpdateGroupInput{
+		TierFallbackGroupID: &tierFallbackID,
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "tier_fallback_group_id only supported for OpenAI groups")
+	require.Nil(t, repo.updated)
+}
+
+func TestAdminService_UpdateGroup_TierFallbackRejectsPlatformChangeAwayFromOpenAI(t *testing.T) {
+	tierFallbackID := int64(10)
+	existing := &Group{
+		ID:                  1,
+		Name:                "g1",
+		Platform:            PlatformOpenAI,
+		Status:              StatusActive,
+		TierFallbackGroupID: &tierFallbackID,
+	}
+	repo := &groupRepoStubForInvalidRequestFallback{
+		groups: map[int64]*Group{
+			existing.ID:    existing,
+			tierFallbackID: {ID: tierFallbackID, Platform: PlatformOpenAI, Status: StatusActive},
+		},
+	}
+	svc := &adminServiceImpl{groupRepo: repo}
+
+	_, err := svc.UpdateGroup(context.Background(), existing.ID, &UpdateGroupInput{
+		Platform: PlatformAnthropic,
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "tier_fallback_group_id only supported for OpenAI groups")
+	require.Nil(t, repo.updated)
+}
+
+func TestAdminService_UpdateGroup_TierFallbackRejectsIndirectCycle(t *testing.T) {
+	groupAID := int64(1)
+	groupBID := int64(2)
+	groupCID := int64(3)
+
+	existing := &Group{
+		ID:       groupCID,
+		Name:     "g3",
+		Platform: PlatformOpenAI,
+		Status:   StatusActive,
+	}
+	repo := &groupRepoStubForInvalidRequestFallback{
+		groups: map[int64]*Group{
+			groupAID: {
+				ID:                  groupAID,
+				Platform:            PlatformOpenAI,
+				Status:              StatusActive,
+				TierFallbackGroupID: &groupBID,
+			},
+			groupBID: {
+				ID:                  groupBID,
+				Platform:            PlatformOpenAI,
+				Status:              StatusActive,
+				TierFallbackGroupID: &groupCID,
+			},
+			groupCID: existing,
+		},
+	}
+	svc := &adminServiceImpl{groupRepo: repo}
+
+	_, err := svc.UpdateGroup(context.Background(), groupCID, &UpdateGroupInput{
+		TierFallbackGroupID: &groupAID,
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "tier_fallback_group_id cycle detected")
+	require.Nil(t, repo.updated)
 }

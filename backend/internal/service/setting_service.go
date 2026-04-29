@@ -108,6 +108,7 @@ type WebSearchManagerBuilder func(cfg *WebSearchEmulationConfig, proxyURLs map[i
 type SettingService struct {
 	settingRepo             SettingRepository
 	defaultSubGroupReader   DefaultSubscriptionGroupReader
+	groupRepo               GroupRepository // for validating tier group IDs on write
 	proxyRepo               ProxyRepository // for resolving websearch provider proxy URLs
 	cfg                     *config.Config
 	onUpdate                func() // Callback when settings are updated (for cache invalidation)
@@ -378,6 +379,11 @@ func (s *SettingService) SetDefaultSubscriptionGroupReader(reader DefaultSubscri
 // SetProxyRepository injects a proxy repo for resolving websearch provider proxy URLs.
 func (s *SettingService) SetProxyRepository(repo ProxyRepository) {
 	s.proxyRepo = repo
+}
+
+// SetGroupRepository injects a group repo for validating tier group IDs on write.
+func (s *SettingService) SetGroupRepository(repo GroupRepository) {
+	s.groupRepo = repo
 }
 
 // GetAllSettings 获取所有系统设置

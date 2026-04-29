@@ -115,6 +115,18 @@ func (APIKey) Fields() []ent.Field {
 			Optional().
 			Nillable().
 			Comment("Start time of the current 7d rate limit window"),
+
+		// ========== Tier fallback chain ==========
+		// 按顺序的降级 group 链路：当主 group 内所有候选账号都失败时，按列表顺序切换到下一档
+		// 与 Group.fallback_group_id（CCO 触发器）互不影响
+		field.JSON("tier_group_ids", []int64{}).
+			Optional().
+			Default([]int64{}).
+			SchemaType(map[string]string{dialect.Postgres: "jsonb"}).
+			Comment("Per-key tier fallback chain (ordered list of group IDs)"),
+		field.Int("max_tier_depth").
+			Default(0).
+			Comment("Tier chain depth cap; 0 = unlimited"),
 	}
 }
 

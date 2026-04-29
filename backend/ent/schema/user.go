@@ -112,6 +112,13 @@ func (User) Fields() []ent.Field {
 		// 用户级每分钟请求数上限（0 = 不限制）。仅当所在分组未设置 rpm_limit 时作为兜底生效。
 		field.Int("rpm_limit").
 			Default(0),
+
+		// 用户级 tier 降级链路默认值。当 api_key.tier_group_ids 为空时作为兜底。
+		field.JSON("default_tier_group_ids", []int64{}).
+			Optional().
+			Default([]int64{}).
+			SchemaType(map[string]string{dialect.Postgres: "jsonb"}).
+			Comment("User-level default tier fallback chain"),
 	}
 }
 

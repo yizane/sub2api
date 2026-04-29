@@ -307,6 +307,26 @@ func (_c *APIKeyCreate) SetNillableWindow7dStart(v *time.Time) *APIKeyCreate {
 	return _c
 }
 
+// SetTierGroupIds sets the "tier_group_ids" field.
+func (_c *APIKeyCreate) SetTierGroupIds(v []int64) *APIKeyCreate {
+	_c.mutation.SetTierGroupIds(v)
+	return _c
+}
+
+// SetMaxTierDepth sets the "max_tier_depth" field.
+func (_c *APIKeyCreate) SetMaxTierDepth(v int) *APIKeyCreate {
+	_c.mutation.SetMaxTierDepth(v)
+	return _c
+}
+
+// SetNillableMaxTierDepth sets the "max_tier_depth" field if the given value is not nil.
+func (_c *APIKeyCreate) SetNillableMaxTierDepth(v *int) *APIKeyCreate {
+	if v != nil {
+		_c.SetMaxTierDepth(*v)
+	}
+	return _c
+}
+
 // SetUser sets the "user" edge to the User entity.
 func (_c *APIKeyCreate) SetUser(v *User) *APIKeyCreate {
 	return _c.SetUserID(v.ID)
@@ -419,6 +439,14 @@ func (_c *APIKeyCreate) defaults() error {
 		v := apikey.DefaultUsage7d
 		_c.mutation.SetUsage7d(v)
 	}
+	if _, ok := _c.mutation.TierGroupIds(); !ok {
+		v := apikey.DefaultTierGroupIds
+		_c.mutation.SetTierGroupIds(v)
+	}
+	if _, ok := _c.mutation.MaxTierDepth(); !ok {
+		v := apikey.DefaultMaxTierDepth
+		_c.mutation.SetMaxTierDepth(v)
+	}
 	return nil
 }
 
@@ -480,6 +508,9 @@ func (_c *APIKeyCreate) check() error {
 	}
 	if _, ok := _c.mutation.Usage7d(); !ok {
 		return &ValidationError{Name: "usage_7d", err: errors.New(`ent: missing required field "APIKey.usage_7d"`)}
+	}
+	if _, ok := _c.mutation.MaxTierDepth(); !ok {
+		return &ValidationError{Name: "max_tier_depth", err: errors.New(`ent: missing required field "APIKey.max_tier_depth"`)}
 	}
 	if len(_c.mutation.UserIDs()) == 0 {
 		return &ValidationError{Name: "user", err: errors.New(`ent: missing required edge "APIKey.user"`)}
@@ -594,6 +625,14 @@ func (_c *APIKeyCreate) createSpec() (*APIKey, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.Window7dStart(); ok {
 		_spec.SetField(apikey.FieldWindow7dStart, field.TypeTime, value)
 		_node.Window7dStart = &value
+	}
+	if value, ok := _c.mutation.TierGroupIds(); ok {
+		_spec.SetField(apikey.FieldTierGroupIds, field.TypeJSON, value)
+		_node.TierGroupIds = value
+	}
+	if value, ok := _c.mutation.MaxTierDepth(); ok {
+		_spec.SetField(apikey.FieldMaxTierDepth, field.TypeInt, value)
+		_node.MaxTierDepth = value
 	}
 	if nodes := _c.mutation.UserIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -1060,6 +1099,42 @@ func (u *APIKeyUpsert) UpdateWindow7dStart() *APIKeyUpsert {
 // ClearWindow7dStart clears the value of the "window_7d_start" field.
 func (u *APIKeyUpsert) ClearWindow7dStart() *APIKeyUpsert {
 	u.SetNull(apikey.FieldWindow7dStart)
+	return u
+}
+
+// SetTierGroupIds sets the "tier_group_ids" field.
+func (u *APIKeyUpsert) SetTierGroupIds(v []int64) *APIKeyUpsert {
+	u.Set(apikey.FieldTierGroupIds, v)
+	return u
+}
+
+// UpdateTierGroupIds sets the "tier_group_ids" field to the value that was provided on create.
+func (u *APIKeyUpsert) UpdateTierGroupIds() *APIKeyUpsert {
+	u.SetExcluded(apikey.FieldTierGroupIds)
+	return u
+}
+
+// ClearTierGroupIds clears the value of the "tier_group_ids" field.
+func (u *APIKeyUpsert) ClearTierGroupIds() *APIKeyUpsert {
+	u.SetNull(apikey.FieldTierGroupIds)
+	return u
+}
+
+// SetMaxTierDepth sets the "max_tier_depth" field.
+func (u *APIKeyUpsert) SetMaxTierDepth(v int) *APIKeyUpsert {
+	u.Set(apikey.FieldMaxTierDepth, v)
+	return u
+}
+
+// UpdateMaxTierDepth sets the "max_tier_depth" field to the value that was provided on create.
+func (u *APIKeyUpsert) UpdateMaxTierDepth() *APIKeyUpsert {
+	u.SetExcluded(apikey.FieldMaxTierDepth)
+	return u
+}
+
+// AddMaxTierDepth adds v to the "max_tier_depth" field.
+func (u *APIKeyUpsert) AddMaxTierDepth(v int) *APIKeyUpsert {
+	u.Add(apikey.FieldMaxTierDepth, v)
 	return u
 }
 
@@ -1532,6 +1607,48 @@ func (u *APIKeyUpsertOne) UpdateWindow7dStart() *APIKeyUpsertOne {
 func (u *APIKeyUpsertOne) ClearWindow7dStart() *APIKeyUpsertOne {
 	return u.Update(func(s *APIKeyUpsert) {
 		s.ClearWindow7dStart()
+	})
+}
+
+// SetTierGroupIds sets the "tier_group_ids" field.
+func (u *APIKeyUpsertOne) SetTierGroupIds(v []int64) *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetTierGroupIds(v)
+	})
+}
+
+// UpdateTierGroupIds sets the "tier_group_ids" field to the value that was provided on create.
+func (u *APIKeyUpsertOne) UpdateTierGroupIds() *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateTierGroupIds()
+	})
+}
+
+// ClearTierGroupIds clears the value of the "tier_group_ids" field.
+func (u *APIKeyUpsertOne) ClearTierGroupIds() *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.ClearTierGroupIds()
+	})
+}
+
+// SetMaxTierDepth sets the "max_tier_depth" field.
+func (u *APIKeyUpsertOne) SetMaxTierDepth(v int) *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetMaxTierDepth(v)
+	})
+}
+
+// AddMaxTierDepth adds v to the "max_tier_depth" field.
+func (u *APIKeyUpsertOne) AddMaxTierDepth(v int) *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.AddMaxTierDepth(v)
+	})
+}
+
+// UpdateMaxTierDepth sets the "max_tier_depth" field to the value that was provided on create.
+func (u *APIKeyUpsertOne) UpdateMaxTierDepth() *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateMaxTierDepth()
 	})
 }
 
@@ -2170,6 +2287,48 @@ func (u *APIKeyUpsertBulk) UpdateWindow7dStart() *APIKeyUpsertBulk {
 func (u *APIKeyUpsertBulk) ClearWindow7dStart() *APIKeyUpsertBulk {
 	return u.Update(func(s *APIKeyUpsert) {
 		s.ClearWindow7dStart()
+	})
+}
+
+// SetTierGroupIds sets the "tier_group_ids" field.
+func (u *APIKeyUpsertBulk) SetTierGroupIds(v []int64) *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetTierGroupIds(v)
+	})
+}
+
+// UpdateTierGroupIds sets the "tier_group_ids" field to the value that was provided on create.
+func (u *APIKeyUpsertBulk) UpdateTierGroupIds() *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateTierGroupIds()
+	})
+}
+
+// ClearTierGroupIds clears the value of the "tier_group_ids" field.
+func (u *APIKeyUpsertBulk) ClearTierGroupIds() *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.ClearTierGroupIds()
+	})
+}
+
+// SetMaxTierDepth sets the "max_tier_depth" field.
+func (u *APIKeyUpsertBulk) SetMaxTierDepth(v int) *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetMaxTierDepth(v)
+	})
+}
+
+// AddMaxTierDepth adds v to the "max_tier_depth" field.
+func (u *APIKeyUpsertBulk) AddMaxTierDepth(v int) *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.AddMaxTierDepth(v)
+	})
+}
+
+// UpdateMaxTierDepth sets the "max_tier_depth" field to the value that was provided on create.
+func (u *APIKeyUpsertBulk) UpdateMaxTierDepth() *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateMaxTierDepth()
 	})
 }
 

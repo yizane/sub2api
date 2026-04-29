@@ -188,10 +188,11 @@ const (
 	SettingKeyCustomEndpoints             = "custom_endpoints"              // 自定义端点列表（JSON 数组）
 
 	// 默认配置
-	SettingKeyDefaultConcurrency   = "default_concurrency"    // 新用户默认并发量
-	SettingKeyDefaultBalance       = "default_balance"        // 新用户默认余额
-	SettingKeyDefaultSubscriptions = "default_subscriptions"  // 新用户默认订阅列表（JSON）
-	SettingKeyDefaultUserRPMLimit  = "default_user_rpm_limit" // 新用户默认 RPM 限制（0 = 不限制）
+	SettingKeyDefaultConcurrency   = "default_concurrency"      // 新用户默认并发量
+	SettingKeyDefaultBalance       = "default_balance"          // 新用户默认余额
+	SettingKeyDefaultSubscriptions = "default_subscriptions"    // 新用户默认订阅列表（JSON）
+	SettingKeyDefaultUserRPMLimit  = "default_user_rpm_limit"   // 新用户默认 RPM 限制（0 = 不限制）
+	SettingKeyDefaultTierGroupIDs  = "default_tier_group_ids"   // 系统级默认 tier 降级链路（JSON int64 数组）
 
 	// 第三方认证来源默认授予配置
 	SettingKeyAuthSourceDefaultEmailBalance            = "auth_source_default_email_balance"

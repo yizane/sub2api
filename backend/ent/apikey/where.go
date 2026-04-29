@@ -160,6 +160,11 @@ func Window7dStart(v time.Time) predicate.APIKey {
 	return predicate.APIKey(sql.FieldEQ(FieldWindow7dStart, v))
 }
 
+// MaxTierDepth applies equality check predicate on the "max_tier_depth" field. It's identical to MaxTierDepthEQ.
+func MaxTierDepth(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldMaxTierDepth, v))
+}
+
 // CreatedAtEQ applies the EQ predicate on the "created_at" field.
 func CreatedAtEQ(v time.Time) predicate.APIKey {
 	return predicate.APIKey(sql.FieldEQ(FieldCreatedAt, v))
@@ -1123,6 +1128,56 @@ func Window7dStartIsNil() predicate.APIKey {
 // Window7dStartNotNil applies the NotNil predicate on the "window_7d_start" field.
 func Window7dStartNotNil() predicate.APIKey {
 	return predicate.APIKey(sql.FieldNotNull(FieldWindow7dStart))
+}
+
+// TierGroupIdsIsNil applies the IsNil predicate on the "tier_group_ids" field.
+func TierGroupIdsIsNil() predicate.APIKey {
+	return predicate.APIKey(sql.FieldIsNull(FieldTierGroupIds))
+}
+
+// TierGroupIdsNotNil applies the NotNil predicate on the "tier_group_ids" field.
+func TierGroupIdsNotNil() predicate.APIKey {
+	return predicate.APIKey(sql.FieldNotNull(FieldTierGroupIds))
+}
+
+// MaxTierDepthEQ applies the EQ predicate on the "max_tier_depth" field.
+func MaxTierDepthEQ(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldMaxTierDepth, v))
+}
+
+// MaxTierDepthNEQ applies the NEQ predicate on the "max_tier_depth" field.
+func MaxTierDepthNEQ(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNEQ(FieldMaxTierDepth, v))
+}
+
+// MaxTierDepthIn applies the In predicate on the "max_tier_depth" field.
+func MaxTierDepthIn(vs ...int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldIn(FieldMaxTierDepth, vs...))
+}
+
+// MaxTierDepthNotIn applies the NotIn predicate on the "max_tier_depth" field.
+func MaxTierDepthNotIn(vs ...int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNotIn(FieldMaxTierDepth, vs...))
+}
+
+// MaxTierDepthGT applies the GT predicate on the "max_tier_depth" field.
+func MaxTierDepthGT(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldGT(FieldMaxTierDepth, v))
+}
+
+// MaxTierDepthGTE applies the GTE predicate on the "max_tier_depth" field.
+func MaxTierDepthGTE(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldGTE(FieldMaxTierDepth, v))
+}
+
+// MaxTierDepthLT applies the LT predicate on the "max_tier_depth" field.
+func MaxTierDepthLT(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldLT(FieldMaxTierDepth, v))
+}
+
+// MaxTierDepthLTE applies the LTE predicate on the "max_tier_depth" field.
+func MaxTierDepthLTE(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldLTE(FieldMaxTierDepth, v))
 }
 
 // HasUser applies the HasEdge predicate on the "user" edge.

@@ -1340,6 +1340,16 @@ func RpmLimitLTE(v int) predicate.User {
 	return predicate.User(sql.FieldLTE(FieldRpmLimit, v))
 }
 
+// DefaultTierGroupIdsIsNil applies the IsNil predicate on the "default_tier_group_ids" field.
+func DefaultTierGroupIdsIsNil() predicate.User {
+	return predicate.User(sql.FieldIsNull(FieldDefaultTierGroupIds))
+}
+
+// DefaultTierGroupIdsNotNil applies the NotNil predicate on the "default_tier_group_ids" field.
+func DefaultTierGroupIdsNotNil() predicate.User {
+	return predicate.User(sql.FieldNotNull(FieldDefaultTierGroupIds))
+}
+
 // HasAPIKeys applies the HasEdge predicate on the "api_keys" edge.
 func HasAPIKeys() predicate.User {
 	return predicate.User(func(s *sql.Selector) {
